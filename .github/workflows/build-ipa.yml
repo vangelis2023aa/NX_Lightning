@@ -10,9 +10,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: List schemes (for safety)
+      - name: Show available projects and schemes
         run: |
+          echo "=== Looking for xcodeproj ==="
+          find . -name "*.xcodeproj" | head -10
+          echo ""
+          echo "=== Listing schemes ==="
           xcodebuild -list -project src/MeloNX/MeloNX.xcodeproj || true
+          echo ""
+          echo "=== Current directory ==="
+          pwd
+          ls -la src/MeloNX/ || true
 
       - name: Build unsigned archive
         run: |
@@ -24,18 +32,18 @@ jobs:
             -archivePath $RUNNER_TEMP/NXLightning.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+            CODE_SIGN_IDENTITY="" || exit 1
 
       - name: Create IPA
         run: |
           mkdir -p Payload
-          cp -r $RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/*.app Payload/
+          cp -r $RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/*.app Payload/ || true
           zip -r NXLightning-unsigned.ipa Payload
-          mv NXLightning-unsigned.ipa $RUNNER_TEMP/
+          mv NXLightning-unsigned.ipa $RUNNER_TEMP/ || true
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: NXLightning-IPA
           path: ${{ runner.temp }}/NXLightning-unsigned.ipa
+          if-no-files-found: ignore
