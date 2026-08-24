@@ -45,6 +45,8 @@ namespace Ryujinx.Graphics.Shader.Translation
         public bool YNegateEnabled => _graphicsState.YNegateEnabled;
         public bool OriginUpperLeft => _graphicsState.OriginUpperLeft;
 
+        public bool HalvePrimitiveId => _graphicsState.HalvePrimitiveId;
+
         public ImapPixelType[] ImapTypes { get; }
         public bool IaIndexing { get; private set; }
         public bool OaIndexing { get; private set; }
@@ -155,7 +157,7 @@ namespace Ryujinx.Graphics.Shader.Translation
             GpPassthrough = gpPassthrough;
             ThreadsPerInputPrimitive = threadsPerInputPrimitive;
             OutputTopology = outputTopology;
-            MaxOutputVertices = gpPassthrough ? graphicsState.Topology.ToInputVerticesNoAdjacency() : maxOutputVertices;
+            MaxOutputVertices = gpPassthrough ? graphicsState.Topology.InputVertexCountNoAdjacency : maxOutputVertices;
             ImapTypes = imapTypes;
             OmapTargets = omapTargets;
             OmapSampleMask = omapSampleMask;
@@ -190,7 +192,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                             component = subIndex;
                         }
 
-                        var transformFeedbackVariable = new TransformFeedbackVariable(ioVariable, location, component);
+                        TransformFeedbackVariable transformFeedbackVariable = new(ioVariable, location, component);
                         _transformFeedbackDefinitions.TryAdd(transformFeedbackVariable, transformFeedbackOutputs[wordOffset]);
                     }
                 }
@@ -217,7 +219,7 @@ namespace Ryujinx.Graphics.Shader.Translation
                 return false;
             }
 
-            var transformFeedbackVariable = new TransformFeedbackVariable(ioVariable, location, component);
+            TransformFeedbackVariable transformFeedbackVariable = new(ioVariable, location, component);
             return _transformFeedbackDefinitions.TryGetValue(transformFeedbackVariable, out transformFeedbackOutput);
         }
 
@@ -269,8 +271,8 @@ namespace Ryujinx.Graphics.Shader.Translation
 
             for (; count < 4; count++)
             {
-                ref var prev = ref _transformFeedbackOutputs[baseIndex + count - 1];
-                ref var curr = ref _transformFeedbackOutputs[baseIndex + count];
+                ref TransformFeedbackOutput prev = ref _transformFeedbackOutputs[baseIndex + count - 1];
+                ref TransformFeedbackOutput curr = ref _transformFeedbackOutputs[baseIndex + count];
 
                 int prevOffset = prev.Offset;
                 int currOffset = curr.Offset;
@@ -291,7 +293,7 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         public AggregateType GetFragmentOutputColorType(int location)
         {
-            return AggregateType.Vector4 | _graphicsState.FragmentOutputTypes[location].ToAggregateType();
+            return AggregateType.Vector4 | _graphicsState.FragmentOutputTypes[location].Aggregate;
         }
 
         public AggregateType GetUserDefinedType(int location, bool isOutput)
@@ -305,7 +307,7 @@ namespace Ryujinx.Graphics.Shader.Translation
 
             if (Stage == ShaderStage.Vertex && !isOutput)
             {
-                type |= _graphicsState.AttributeTypes[location].ToAggregateType(SupportsScaledVertexFormats);
+                type |= _graphicsState.AttributeTypes[location].AsAggregate(SupportsScaledVertexFormats);
             }
             else
             {

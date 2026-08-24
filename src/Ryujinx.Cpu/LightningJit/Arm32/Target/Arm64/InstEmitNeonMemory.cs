@@ -467,7 +467,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm32.Target.Arm64
         private static void EmitMemory1234InstructionCore(CodeGenContext context, uint rn, uint rm, int bytes, Action<Operand> callback)
         {
             bool wBack = rm != RegisterUtils.PcRegister;
-            bool registerIndex = rm != RegisterUtils.PcRegister && rm != RegisterUtils.SpRegister;
+            bool registerIndex = rm is not RegisterUtils.PcRegister and not RegisterUtils.SpRegister;
 
             Operand rnOperand = InstEmitCommon.GetInputGpr(context, rn);
 
@@ -717,6 +717,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm32.Target.Arm64
             }
         }
 
+        [Conditional("DEBUG")]
         private static void AssertSequentialRegisters(ReadOnlySpan<ScopedRegister> registers)
         {
             for (int index = 1; index < registers.Length; index++)

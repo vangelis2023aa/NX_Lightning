@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-using static Ryujinx.Audio.Renderer.Parameter.VoiceInParameter;
+using Ryujinx.Audio.Renderer.Parameter;
 
 namespace Ryujinx.Audio.Renderer.Dsp
 {
@@ -42,7 +42,7 @@ namespace Ryujinx.Audio.Renderer.Dsp
             };
         }
 
-        public static void ProcessWaveBuffers(IVirtualMemoryManager memoryManager, Span<float> outputBuffer, ref WaveBufferInformation info, Span<WaveBuffer> wavebuffers, ref VoiceUpdateState voiceState, uint targetSampleRate, int sampleCount)
+        public static void ProcessWaveBuffers(IVirtualMemoryManager memoryManager, Span<float> outputBuffer, ref WaveBufferInformation info, Span<WaveBuffer> wavebuffers, ref VoiceState voiceState, uint targetSampleRate, int sampleCount)
         {
             const int TempBufferSize = 0x3F00;
 
@@ -74,7 +74,7 @@ namespace Ryujinx.Audio.Renderer.Dsp
                 {
                     int tempBufferIndex = 0;
 
-                    if (!info.DecodingBehaviour.HasFlag(DecodingBehaviour.SkipPitchAndSampleRateConversion))
+                    if ((info.DecodingBehaviour & DecodingBehaviour.SkipPitchAndSampleRateConversion) != DecodingBehaviour.SkipPitchAndSampleRateConversion)
                     {
                         voiceState.Pitch.AsSpan()[..pitchMaxLength].CopyTo(tempBuffer);
                         tempBufferIndex += pitchMaxLength;
@@ -208,7 +208,7 @@ namespace Ryujinx.Audio.Renderer.Dsp
                                     break;
                                 }
 
-                                if (info.DecodingBehaviour.HasFlag(DecodingBehaviour.PlayedSampleCountResetWhenLooping))
+                                if ((info.DecodingBehaviour & DecodingBehaviour.PlayedSampleCountResetWhenLooping) == DecodingBehaviour.PlayedSampleCountResetWhenLooping)
                                 {
                                     playedSampleCount = 0;
                                 }
@@ -222,7 +222,7 @@ namespace Ryujinx.Audio.Renderer.Dsp
 
                     Span<int> outputSpanInt = MemoryMarshal.Cast<float, int>(outputBuffer[i..]);
 
-                    if (info.DecodingBehaviour.HasFlag(DecodingBehaviour.SkipPitchAndSampleRateConversion))
+                    if ((info.DecodingBehaviour & DecodingBehaviour.SkipPitchAndSampleRateConversion) == DecodingBehaviour.SkipPitchAndSampleRateConversion)
                     {
                         for (int j = 0; j < y; j++)
                         {

@@ -70,23 +70,31 @@ namespace Ryujinx.HLE.HOS
 
         public void EnableCheats(string[] enabledCheats)
         {
-            foreach (var program in _programDictionary.Values)
+            foreach (ITamperProgram program in _programDictionary.Values)
             {
                 program.IsEnabled = false;
             }
 
-            foreach (var cheat in enabledCheats)
+            foreach (string cheat in enabledCheats)
             {
-                if (_programDictionary.TryGetValue(cheat, out var program))
+                if (_programDictionary.TryGetValue(cheat, out ITamperProgram program))
                 {
                     program.IsEnabled = true;
                 }
             }
         }
 
+        public void EnableAllCheats()
+        {
+            foreach (ITamperProgram program in _programDictionary.Values)
+            {
+                program.IsEnabled = true;
+            }
+        }
+
         private static bool IsProcessValid(ITamperedProcess process)
         {
-            return process.State != ProcessState.Crashed && process.State != ProcessState.Exiting && process.State != ProcessState.Exited;
+            return process.State is not ProcessState.Crashed and not ProcessState.Exiting and not ProcessState.Exited;
         }
 
         private void TamperRunner()
@@ -143,7 +151,7 @@ namespace Ryujinx.HLE.HOS
 
             try
             {
-                ControllerKeys pressedKeys = (ControllerKeys)Thread.VolatileRead(ref _pressedKeys);
+                ControllerKeys pressedKeys = (ControllerKeys)Volatile.Read(ref _pressedKeys);
                 program.Process.TamperedCodeMemory = false;
                 program.Execute(pressedKeys);
 
@@ -173,16 +181,16 @@ namespace Ryujinx.HLE.HOS
             // Look for the input of the player one or the handheld.
             foreach (GamepadInput input in gamepadInputs)
             {
-                if (input.PlayerId == PlayerIndex.Player1 || input.PlayerId == PlayerIndex.Handheld)
+                if (input.PlayerId is PlayerIndex.Player1 or PlayerIndex.Handheld)
                 {
-                    Thread.VolatileWrite(ref _pressedKeys, (long)input.Buttons);
+                    Volatile.Write(ref _pressedKeys, (long)input.Buttons);
 
                     return;
                 }
             }
 
             // Clear the input because player one is not conected.
-            Thread.VolatileWrite(ref _pressedKeys, 0);
+            Volatile.Write(ref _pressedKeys, 0);
         }
     }
 }

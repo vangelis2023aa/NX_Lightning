@@ -5,7 +5,7 @@ namespace Ryujinx.Common.Logging.Targets
 {
     public class ConsoleLogTarget : ILogTarget
     {
-        private readonly ILogFormatter _formatter;
+        private readonly DefaultLogFormatter _formatter;
 
         private readonly string _name;
 
@@ -30,10 +30,8 @@ namespace Ryujinx.Common.Logging.Targets
 
         public void Log(object sender, LogEventArgs args)
         {
-            if (OperatingSystem.IsIOS())
-            {
+            if (OperatingSystem.IsIOS())    
                 Console.WriteLine(_formatter.Format(args));
-            }
             else
             {
                 Console.ForegroundColor = GetLogColor(args.Level);
@@ -45,11 +43,7 @@ namespace Ryujinx.Common.Logging.Targets
         public void Dispose()
         {
             GC.SuppressFinalize(this);
-
-            if (!OperatingSystem.IsIOS())
-            {
-                Console.ResetColor();
-            }
+            Console.ResetColor();
         }
     }
 }

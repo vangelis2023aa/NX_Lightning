@@ -1,6 +1,5 @@
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Device;
-using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Gpu.Engine.MME
 {
@@ -12,7 +11,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         /// <summary>
         /// Arguments FIFO.
         /// </summary>
-        public Queue<FifoWord> Fifo { get; } = new();
+        public MacroFifo Fifo { get; } = new();
 
         /// <summary>
         /// Fetches a arguments from the arguments FIFO.
@@ -20,7 +19,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         /// <returns>The call argument, or 0 if the FIFO is empty</returns>
         public int FetchParam()
         {
-            if (!Fifo.TryDequeue(out var value))
+            if (!Fifo.TryDequeue(out FifoWord value))
             {
                 Logger.Warning?.Print(LogClass.Gpu, "Macro attempted to fetch an inexistent argument.");
 

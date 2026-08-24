@@ -1,16 +1,17 @@
 using Ryujinx.HLE.HOS.Applets;
+using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.ApplicationProxy.Types;
 
-namespace Ryujinx.HLE.Ui
+namespace Ryujinx.HLE.UI
 {
-    public interface IHostUiHandler
+    public interface IHostUIHandler
     {
         /// <summary>
         /// Displays an Input Dialog box to the user and blocks until text is entered.
         /// </summary>
         /// <param name="userText">Text that the user entered. Set to `null` on internal errors</param>
         /// <returns>True when OK is pressed, False otherwise. Also returns True on internal errors</returns>
-        bool DisplayInputDialog(SoftwareKeyboardUiArgs args, out string userText);
+        bool DisplayInputDialog(SoftwareKeyboardUIArgs args, out string userText);
 
         /// <summary>
         /// Displays a Message Dialog box to the user and blocks until it is closed.
@@ -22,20 +23,34 @@ namespace Ryujinx.HLE.Ui
         /// Displays a Message Dialog box specific to Controller Applet and blocks until it is closed.
         /// </summary>
         /// <returns>True when OK is pressed, False otherwise.</returns>
-        bool DisplayMessageDialog(ControllerAppletUiArgs args);
+        bool DisplayMessageDialog(ControllerAppletUIArgs args);
 
         /// <summary>
-        /// Tell the UI that we need to transisition to another program.
+        /// Displays an Input Dialog box to the user so they can enter the Amiibo's new name
+        /// </summary>
+        /// <param name="userText">Text that the user entered. Set to `null` on internal errors</param>
+        /// <returns>True when OK is pressed, False otherwise. Also returns True on internal errors</returns>
+        bool DisplayCabinetDialog(out string userText);
+
+        /// <summary>
+        /// Displays a Message Dialog box to the user to notify them to scan the Amiibo.
+        /// </summary>
+        void DisplayCabinetMessageDialog();
+
+        /// <summary>
+        /// Tell the UI that we need to transition to another program.
         /// </summary>
         /// <param name="device">The device instance.</param>
         /// <param name="kind">The program kind.</param>
         /// <param name="value">The value associated to the <paramref name="kind"/>.</param>
         void ExecuteProgram(Switch device, ProgramSpecifyKind kind, ulong value);
 
+        /// <summary>
         /// Displays a Message Dialog box specific to Error Applet and blocks until it is closed.
         /// </summary>
         /// <returns>False when OK is pressed, True when another button (Details) is pressed.</returns>
-        bool DisplayErrorAppletDialog(string title, string message, string[] buttonsText);
+        // ReSharper disable once UnusedParameter.Global
+        bool DisplayErrorAppletDialog(string title, string message, string[] buttonsText, (uint Module, uint Description)? errorCode = null);
 
         /// <summary>
         /// Creates a handler to process keyboard inputs into text strings.
@@ -46,6 +61,17 @@ namespace Ryujinx.HLE.Ui
         /// <summary>
         /// Gets fonts and colors used by the host.
         /// </summary>
-        IHostUiTheme HostUiTheme { get; }
+        IHostUITheme HostUITheme { get; }
+
+
+        /// <summary>
+        /// Displays the player select dialog and returns the selected profile.
+        /// </summary>
+        UserProfile ShowPlayerSelectDialog();
+        
+        /// <summary>
+        /// Takes a screenshot from the current renderer and saves it in the screenshots folder.
+        /// </summary>
+        void TakeScreenshot();
     }
 }

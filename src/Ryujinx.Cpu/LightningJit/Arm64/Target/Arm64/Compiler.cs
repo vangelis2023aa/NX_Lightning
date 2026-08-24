@@ -3,7 +3,6 @@ using ARMeilleure.Memory;
 using Ryujinx.Cpu.LightningJit.CodeGen;
 using Ryujinx.Cpu.LightningJit.CodeGen.Arm64;
 using Ryujinx.Cpu.LightningJit.Graph;
-using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
@@ -20,11 +19,11 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
             public readonly RegisterAllocator RegisterAllocator;
             public readonly TailMerger TailMerger;
             public readonly AddressTable<ulong> FuncTable;
-            public readonly IntPtr DispatchStubPointer;
+            public readonly nint DispatchStubPointer;
 
             private readonly MultiBlock _multiBlock;
             private readonly RegisterSaveRestore _registerSaveRestore;
-            private readonly IntPtr _pageTablePointer;
+            private readonly nint _pageTablePointer;
 
             public Context(
                 CodeWriter writer,
@@ -33,8 +32,8 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
                 RegisterSaveRestore registerSaveRestore,
                 MultiBlock multiBlock,
                 AddressTable<ulong> funcTable,
-                IntPtr dispatchStubPointer,
-                IntPtr pageTablePointer)
+                nint dispatchStubPointer,
+                nint pageTablePointer)
             {
                 Writer = writer;
                 RegisterAllocator = registerAllocator;
@@ -304,19 +303,19 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
             }
         }
 
-        public static CompiledFunction Compile(CpuPreset cpuPreset, IMemoryManager memoryManager, ulong address, AddressTable<ulong> funcTable, IntPtr dispatchStubPtr)
+        public static CompiledFunction Compile(CpuPreset cpuPreset, IMemoryManager memoryManager, ulong address, AddressTable<ulong> funcTable, nint dispatchStubPtr)
         {
             MultiBlock multiBlock = Decoder.DecodeMulti(cpuPreset, memoryManager, address);
 
             Dictionary<ulong, int> targets = new();
-            List<PendingBranch> pendingBranches = new();
+            List<PendingBranch> pendingBranches = [];
 
             uint gprUseMask = multiBlock.GlobalUseMask.GprMask;
             uint fpSimdUseMask = multiBlock.GlobalUseMask.FpSimdMask;
             uint pStateUseMask = multiBlock.GlobalUseMask.PStateMask;
 
             CodeWriter writer = new();
-            RegisterAllocator regAlloc = new(gprUseMask, fpSimdUseMask, pStateUseMask, multiBlock.HasHostCall);
+            RegisterAllocator regAlloc = new(memoryManager.Type, gprUseMask, fpSimdUseMask, pStateUseMask, multiBlock.HasHostCall);
             RegisterSaveRestore rsr = new(
                 regAlloc.AllGprMask & AbiConstants.GprCalleeSavedRegsMask,
                 regAlloc.AllFpSimdMask & AbiConstants.FpSimdCalleeSavedRegsMask,
@@ -350,13 +349,22 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
 
                     if (instInfo.AddressForm != AddressForm.None)
                     {
-                        InstEmitMemory.RewriteInstruction(memoryManager.Type, writer, regAlloc, instInfo.Name, instInfo.Flags, instInfo.AddressForm, pc, encoding);
+                        InstEmitMemory.RewriteInstruction(
+                            memoryManager.AddressSpaceBits,
+                            memoryManager.Type,
+                            writer,
+                            regAlloc,
+                            instInfo.Name,
+                            instInfo.Flags,
+                            instInfo.AddressForm,
+                            pc,
+                            encoding);
                     }
                     else if (instInfo.Name == InstName.Sys)
                     {
-                        InstEmitMemory.RewriteSysInstruction(memoryManager.Type, writer, regAlloc, encoding);
+                        InstEmitMemory.RewriteSysInstruction(memoryManager.AddressSpaceBits, memoryManager.Type, writer, regAlloc, encoding);
                     }
-                    else if (instInfo.Name.IsSystem())
+                    else if (instInfo.Name.IsSystem)
                     {
                         bool needsContextStoreLoad = InstEmitSystem.NeedsContextStoreLoad(instInfo.Name);
 
@@ -397,7 +405,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
 
                     lastInstructionEncoding = RegisterUtils.RemapRegisters(regAlloc, lastInstructionFlags, lastInstructionEncoding);
 
-                    if (lastInstructionName.IsCall())
+                    if (lastInstructionName.IsCall)
                     {
                         context.StoreToContextBeforeCall(blockIndex, pc + 4UL);
 
@@ -537,6 +545,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
                             context.GetReservedStackOffset(),
                             isTail: true);
                     }
+
                     break;
 
                 case InstName.Ret:
@@ -557,6 +566,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
 
                         context.TailMerger.AddUnconditionalReturn(writer, asm);
                     }
+
                     break;
 
                 case InstName.BCond:
@@ -566,7 +576,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
                 case InstName.Tbz:
                     uint branchMask;
 
-                    if (name == InstName.Tbnz || name == InstName.Tbz)
+                    if (name is InstName.Tbnz or InstName.Tbz)
                     {
                         originalOffset = ImmUtils.ExtractSImm14Times4(encoding);
                         branchMask = 0x3fff;
@@ -623,7 +633,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
                     {
                         delta = targetIndex - branchIndex;
 
-                        if (delta >= -Encodable26BitsOffsetLimit && delta < Encodable26BitsOffsetLimit)
+                        if (delta is >= (-Encodable26BitsOffsetLimit) and < Encodable26BitsOffsetLimit)
                         {
                             writer.WriteInstructionAt(branchIndex, (encoding & ~0x3ffffffu) | (uint)(delta & 0x3ffffff));
                             break;
@@ -644,7 +654,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
                 case InstName.Tbz:
                     uint branchMask;
 
-                    if (name == InstName.Tbnz || name == InstName.Tbz)
+                    if (name is InstName.Tbnz or InstName.Tbz)
                     {
                         originalOffset = ImmUtils.ExtractSImm14Times4(encoding);
                         branchMask = 0x3fff;
@@ -701,6 +711,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
                         writer.WriteInstructionAt(movedBranchIndex, (encoding & ~(branchMask << 5)) | (uint)((delta & branchMask) << 5));
                         WriteTailCallConstant(context, ref asm, blockIndex, targetAddress);
                     }
+
                     break;
 
                 default:

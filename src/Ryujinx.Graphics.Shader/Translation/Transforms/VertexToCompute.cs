@@ -54,6 +54,7 @@ namespace Ryujinx.Graphics.Shader.Translation.Transforms
                         {
                             bool needsSextNorm = context.Definitions.IsAttributePackedRgb10A2Signed(location);
 
+                            SetBindingPair setAndBinding = context.ResourceManager.Reservations.GetVertexBufferTextureSetAndBinding(location);
                             Operand temp = needsSextNorm ? Local() : dest;
                             Operand vertexElemOffset = GenerateVertexOffset(context.ResourceManager, node, location, 0);
 
@@ -62,10 +63,11 @@ namespace Ryujinx.Graphics.Shader.Translation.Transforms
                                 SamplerType.TextureBuffer,
                                 TextureFormat.Unknown,
                                 TextureFlags.IntCoords,
-                                context.ResourceManager.Reservations.GetVertexBufferTextureBinding(location),
+                                setAndBinding.SetIndex,
+                                setAndBinding.Binding,
                                 1 << component,
-                                new[] { temp },
-                                new[] { vertexElemOffset }));
+                                [temp],
+                                [vertexElemOffset]));
 
                             if (needsSextNorm)
                             {
@@ -75,6 +77,7 @@ namespace Ryujinx.Graphics.Shader.Translation.Transforms
                         }
                         else
                         {
+                            SetBindingPair setAndBinding = context.ResourceManager.Reservations.GetVertexBufferTextureSetAndBinding(location);
                             Operand temp = component > 0 ? Local() : dest;
                             Operand vertexElemOffset = GenerateVertexOffset(context.ResourceManager, node, location, component);
 
@@ -83,16 +86,18 @@ namespace Ryujinx.Graphics.Shader.Translation.Transforms
                                 SamplerType.TextureBuffer,
                                 TextureFormat.Unknown,
                                 TextureFlags.IntCoords,
-                                context.ResourceManager.Reservations.GetVertexBufferTextureBinding(location),
+                                setAndBinding.SetIndex,
+                                setAndBinding.Binding,
                                 1,
-                                new[] { temp },
-                                new[] { vertexElemOffset }));
+                                [temp],
+                                [vertexElemOffset]));
 
                             if (component > 0)
                             {
                                 newNode = CopyMasked(context.ResourceManager, newNode, location, component, dest, temp);
                             }
                         }
+
                         break;
                     case IoVariable.GlobalId:
                     case IoVariable.SubgroupEqMask:
@@ -308,21 +313,21 @@ namespace Ryujinx.Graphics.Shader.Translation.Transforms
 
         private static LinkedListNode<INode> GenerateVertexIdVertexRateLoad(ResourceManager resourceManager, LinkedListNode<INode> node, Operand dest)
         {
-            Operand[] sources = new Operand[] { Const(resourceManager.LocalVertexIndexVertexRateMemoryId) };
+            Operand[] sources = [Const(resourceManager.LocalVertexIndexVertexRateMemoryId)];
 
             return node.List.AddBefore(node, new Operation(Instruction.Load, StorageKind.LocalMemory, dest, sources));
         }
 
         private static LinkedListNode<INode> GenerateVertexIdInstanceRateLoad(ResourceManager resourceManager, LinkedListNode<INode> node, Operand dest)
         {
-            Operand[] sources = new Operand[] { Const(resourceManager.LocalVertexIndexInstanceRateMemoryId) };
+            Operand[] sources = [Const(resourceManager.LocalVertexIndexInstanceRateMemoryId)];
 
             return node.List.AddBefore(node, new Operation(Instruction.Load, StorageKind.LocalMemory, dest, sources));
         }
 
         private static LinkedListNode<INode> GenerateInstanceIdLoad(LinkedListNode<INode> node, Operand dest)
         {
-            Operand[] sources = new Operand[] { Const((int)IoVariable.GlobalId), Const(1) };
+            Operand[] sources = [Const((int)IoVariable.GlobalId), Const(1)];
 
             return node.List.AddBefore(node, new Operation(Instruction.Load, StorageKind.Input, dest, sources));
         }

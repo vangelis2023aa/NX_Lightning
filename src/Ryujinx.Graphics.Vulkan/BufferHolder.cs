@@ -1,9 +1,9 @@
-using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 using VkFormat = Silk.NET.Vulkan.Format;
@@ -30,44 +30,35 @@ namespace Ryujinx.Graphics.Vulkan
 
         private readonly VulkanRenderer _gd;
         private readonly Device _device;
-        private MemoryAllocation _allocation;
-        private Auto<DisposableBuffer> _buffer;
-        private Auto<MemoryAllocation> _allocationAuto;
+        private readonly MemoryAllocation _allocation;
+        private readonly Auto<DisposableBuffer> _buffer;
+        private readonly Auto<MemoryAllocation> _allocationAuto;
         private readonly bool _allocationImported;
-        private ulong _bufferHandle;
+        private readonly ulong _bufferHandle;
 
         private CacheByRange<BufferHolder> _cachedConvertedBuffers;
 
         public int Size { get; }
 
-        private IntPtr _map;
+        private readonly nint _map;
 
-        private MultiFenceHolder _waitable;
+        private readonly MultiFenceHolder _waitable;
 
         private bool _lastAccessIsWrite;
 
-        private BufferAllocationType _baseType;
-        private BufferAllocationType _currentType;
-        private bool _swapQueued;
-
-        public BufferAllocationType DesiredType { get; private set; }
-
-        private int _setCount;
-        private int _writeCount;
-        private int _flushCount;
-        private int _flushTemp;
-        private int _lastFlushWrite = -1;
+        private readonly BufferAllocationType _baseType;
+        private readonly BufferAllocationType _activeType;
 
         private readonly ReaderWriterLockSlim _flushLock;
         private FenceHolder _flushFence;
         private int _flushWaiting;
 
-        private List<Action> _swapActions;
-
         private byte[] _pendingData;
         private BufferMirrorRangeList _pendingDataRanges;
         private Dictionary<ulong, StagingBufferReserved> _mirrors;
         private bool _useMirrors;
+
+        private Action _decrementReferenceCount;
 
         public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, MemoryAllocation allocation, int size, BufferAllocationType type, BufferAllocationType currentType)
         {
@@ -82,11 +73,12 @@ namespace Ryujinx.Graphics.Vulkan
             _map = allocation.HostPointer;
 
             _baseType = type;
-            _currentType = currentType;
-            DesiredType = currentType;
+            _activeType = currentType;
 
             _flushLock = new ReaderWriterLockSlim();
             _useMirrors = gd.IsTBDR;
+            
+            _decrementReferenceCount = _buffer.DecrementReferenceCount;
         }
 
         public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, Auto<MemoryAllocation> allocation, int size, BufferAllocationType type, BufferAllocationType currentType, int offset)
@@ -103,8 +95,7 @@ namespace Ryujinx.Graphics.Vulkan
             _map = _allocation.HostPointer + offset;
 
             _baseType = type;
-            _currentType = currentType;
-            DesiredType = currentType;
+            _activeType = currentType;
 
             _flushLock = new ReaderWriterLockSlim();
         }
@@ -119,167 +110,14 @@ namespace Ryujinx.Graphics.Vulkan
             Size = size;
 
             _baseType = BufferAllocationType.Sparse;
-            _currentType = BufferAllocationType.Sparse;
-            DesiredType = BufferAllocationType.Sparse;
+            _activeType = BufferAllocationType.Sparse;
 
             _flushLock = new ReaderWriterLockSlim();
         }
 
-        public bool TryBackingSwap(ref CommandBufferScoped? cbs)
-        {
-            if (_swapQueued && DesiredType != _currentType)
-            {
-                // Only swap if the buffer is not used in any queued command buffer.
-                bool isRented = _buffer.HasRentedCommandBufferDependency(_gd.CommandBufferPool);
-
-                if (!isRented && _gd.CommandBufferPool.OwnedByCurrentThread && !_flushLock.IsReadLockHeld && (_pendingData == null || cbs != null))
-                {
-                    var currentAllocation = _allocationAuto;
-                    var currentBuffer = _buffer;
-                    IntPtr currentMap = _map;
-
-                    (VkBuffer buffer, MemoryAllocation allocation, BufferAllocationType resultType) = _gd.BufferManager.CreateBacking(_gd, Size, DesiredType, false, false, _currentType);
-
-                    if (buffer.Handle != 0)
-                    {
-                        if (cbs != null)
-                        {
-                            ClearMirrors(cbs.Value, 0, Size);
-                        }
-
-                        _flushLock.EnterWriteLock();
-
-                        ClearFlushFence();
-
-                        _waitable = new MultiFenceHolder(Size);
-
-                        _allocation = allocation;
-                        _allocationAuto = new Auto<MemoryAllocation>(allocation);
-                        _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(_gd.Api, _device, buffer), this, _waitable, _allocationAuto);
-                        _bufferHandle = buffer.Handle;
-                        _map = allocation.HostPointer;
-
-                        if (_map != IntPtr.Zero && currentMap != IntPtr.Zero)
-                        {
-                            // Copy data directly. Readbacks don't have to wait if this is done.
-
-                            unsafe
-                            {
-                                new Span<byte>((void*)currentMap, Size).CopyTo(new Span<byte>((void*)_map, Size));
-                            }
-                        }
-                        else
-                        {
-                            cbs ??= _gd.CommandBufferPool.Rent();
-
-                            CommandBufferScoped cbsV = cbs.Value;
-
-                            Copy(_gd, cbsV, currentBuffer, _buffer, 0, 0, Size);
-
-                            // Need to wait for the data to reach the new buffer before data can be flushed.
-
-                            _flushFence = _gd.CommandBufferPool.GetFence(cbsV.CommandBufferIndex);
-                            _flushFence.Get();
-                        }
-
-                        Logger.Debug?.PrintMsg(LogClass.Gpu, $"Converted {Size} buffer {_currentType} to {resultType}");
-
-                        _currentType = resultType;
-
-                        if (_swapActions != null)
-                        {
-                            foreach (var action in _swapActions)
-                            {
-                                action();
-                            }
-
-                            _swapActions.Clear();
-                        }
-
-                        currentBuffer.Dispose();
-                        currentAllocation.Dispose();
-
-                        _gd.PipelineInternal.SwapBuffer(currentBuffer, _buffer);
-
-                        _flushLock.ExitWriteLock();
-                    }
-
-                    _swapQueued = false;
-
-                    return true;
-                }
-
-                return false;
-            }
-
-            _swapQueued = false;
-
-            return true;
-        }
-
-        private void ConsiderBackingSwap()
-        {
-            if (_baseType == BufferAllocationType.Auto)
-            {
-                // When flushed, wait for a bit more info to make a decision.
-                bool wasFlushed = _flushTemp > 0;
-                int multiplier = wasFlushed ? 2 : 0;
-                if (_writeCount >= (WriteCountThreshold << multiplier) || _setCount >= (SetCountThreshold << multiplier) || _flushCount >= (FlushCountThreshold << multiplier))
-                {
-                    if (_flushCount > 0 || _flushTemp-- > 0)
-                    {
-                        // Buffers that flush should ideally be mapped in host address space for easy copies.
-                        // If the buffer is large it will do better on GPU memory, as there will be more writes than data flushes (typically individual pages).
-                        // If it is small, then it's likely most of the buffer will be flushed so we want it on host memory, as access is cached.
-
-                        bool hostMappingSensitive = _gd.Vendor == Vendor.Nvidia;
-                        bool deviceLocalMapped = Size > DeviceLocalSizeThreshold || (wasFlushed && _writeCount > _flushCount * 10 && hostMappingSensitive) || _currentType == BufferAllocationType.DeviceLocalMapped;
-
-                        DesiredType = deviceLocalMapped ? BufferAllocationType.DeviceLocalMapped : BufferAllocationType.HostMapped;
-
-                        // It's harder for a buffer that is flushed to revert to another type of mapping.
-                        if (_flushCount > 0)
-                        {
-                            _flushTemp = 1000;
-                        }
-                    }
-                    else if (_writeCount >= (WriteCountThreshold << multiplier))
-                    {
-                        // Buffers that are written often should ideally be in the device local heap. (Storage buffers)
-                        DesiredType = BufferAllocationType.DeviceLocal;
-                    }
-                    else if (_setCount > (SetCountThreshold << multiplier))
-                    {
-                        // Buffers that have their data set often should ideally be host mapped. (Constant buffers)
-                        DesiredType = BufferAllocationType.HostMapped;
-                    }
-
-                    _lastFlushWrite = -1;
-                    _flushCount = 0;
-                    _writeCount = 0;
-                    _setCount = 0;
-                }
-
-                if (!_swapQueued && DesiredType != _currentType)
-                {
-                    _swapQueued = true;
-
-                    _gd.PipelineInternal.AddBackingSwap(this);
-                }
-            }
-        }
-
-        public void Pin()
-        {
-            if (_baseType == BufferAllocationType.Auto)
-            {
-                _baseType = _currentType;
-            }
-        }
-
         public unsafe Auto<DisposableBufferView> CreateView(VkFormat format, int offset, int size, Action invalidateView)
         {
-            var bufferViewCreateInfo = new BufferViewCreateInfo
+            BufferViewCreateInfo bufferViewCreateInfo = new()
             {
                 SType = StructureType.BufferViewCreateInfo,
                 Buffer = new VkBuffer(_bufferHandle),
@@ -288,19 +126,9 @@ namespace Ryujinx.Graphics.Vulkan
                 Range = (uint)size,
             };
 
-            _gd.Api.CreateBufferView(_device, bufferViewCreateInfo, null, out var bufferView).ThrowOnError();
-
-            (_swapActions ??= new List<Action>()).Add(invalidateView);
+            _gd.Api.CreateBufferView(_device, in bufferViewCreateInfo, null, out BufferView bufferView).ThrowOnError();
 
             return new Auto<DisposableBufferView>(new DisposableBufferView(_gd.Api, _device, bufferView), this, _waitable, _buffer);
-        }
-
-        public void InheritMetrics(BufferHolder other)
-        {
-            _setCount = other._setCount;
-            _writeCount = other._writeCount;
-            _flushCount = other._flushCount;
-            _flushTemp = other._flushTemp;
         }
 
         public unsafe void InsertBarrier(CommandBuffer commandBuffer, bool isWrite)
@@ -329,7 +157,7 @@ namespace Ryujinx.Graphics.Vulkan
                     PipelineStageFlags.AllCommandsBit,
                     DependencyFlags.DeviceGroupBit,
                     1,
-                    memoryBarrier,
+                    in memoryBarrier,
                     0,
                     null,
                     0,
@@ -359,7 +187,7 @@ namespace Ryujinx.Graphics.Vulkan
                 return false;
             }
 
-            var key = ToMirrorKey(offset, size);
+            ulong key = ToMirrorKey(offset, size);
 
             if (_mirrors.TryGetValue(key, out StagingBufferReserved reserved))
             {
@@ -381,14 +209,14 @@ namespace Ryujinx.Graphics.Vulkan
 
             // Build data for the new mirror.
 
-            var baseData = new Span<byte>((void*)(_map + offset), size);
-            var modData = _pendingData.AsSpan(offset, size);
+            Span<byte> baseData = new((void*)(_map + offset), size);
+            Span<byte> modData = _pendingData.AsSpan(offset, size);
 
-            StagingBufferReserved? newMirror = _gd.BufferManager.StagingBuffer.TryReserveData(cbs, size, (int)_gd.Capabilities.MinResourceAlignment);
+            StagingBufferReserved? newMirror = _gd.BufferManager.StagingBuffer.TryReserveData(cbs, size);
 
             if (newMirror != null)
             {
-                var mirror = newMirror.Value;
+                StagingBufferReserved mirror = newMirror.Value;
                 _pendingDataRanges.FillData(baseData, modData, offset, new Span<byte>((void*)(mirror.Buffer._map + mirror.Offset), size));
 
                 if (_mirrors.Count == 0)
@@ -422,17 +250,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (isWrite)
             {
-                _writeCount++;
-
                 SignalWrite(0, Size);
-            }
-            else if (isSSBO)
-            {
-                // Always consider SSBO access for swapping to device local memory.
-
-                _writeCount++;
-
-                ConsiderBackingSwap();
             }
 
             return _buffer;
@@ -442,8 +260,6 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (isWrite)
             {
-                _writeCount++;
-
                 SignalWrite(offset, size);
             }
 
@@ -477,7 +293,7 @@ namespace Ryujinx.Graphics.Vulkan
             if (_pendingData != null)
             {
                 _mirrors.Clear();
-            };
+            }
         }
 
         public void ClearMirrors(CommandBufferScoped cbs, int offset, int size)
@@ -497,7 +313,7 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     _gd.PipelineInternal.Rebind(_buffer, offset, size);
                 }
-            };
+            }
         }
 
         public void UseMirrors()
@@ -507,20 +323,20 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void UploadPendingData(CommandBufferScoped cbs, int offset, int size)
         {
-            var ranges = _pendingDataRanges.FindOverlaps(offset, size);
+            List<BufferMirrorRangeList.Range> ranges = _pendingDataRanges.FindOverlaps(offset, size);
 
             if (ranges != null)
             {
                 _pendingDataRanges.Remove(offset, size);
 
-                foreach (var range in ranges)
+                foreach (BufferMirrorRangeList.Range range in ranges)
                 {
                     int rangeOffset = Math.Max(offset, range.Offset);
                     int rangeSize = Math.Min(offset + size, range.End) - rangeOffset;
 
                     if (_gd.PipelineInternal.CurrentCommandBuffer.CommandBuffer.Handle == cbs.CommandBuffer.Handle)
                     {
-                        SetData(rangeOffset, _pendingData.AsSpan(rangeOffset, rangeSize), cbs, _gd.PipelineInternal.EndRenderPass, false);
+                        SetData(rangeOffset, _pendingData.AsSpan(rangeOffset, rangeSize), cbs, _gd.PipelineInternal.EndRenderPassDelegate, false);
                     }
                     else
                     {
@@ -542,8 +358,6 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SignalWrite(int offset, int size)
         {
-            ConsiderBackingSwap();
-
             if (offset == 0 && size == Size)
             {
                 _cachedConvertedBuffers.Clear();
@@ -554,13 +368,16 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        public BufferHandle GetHandle()
+        public BufferHandle Handle
         {
-            var handle = _bufferHandle;
-            return Unsafe.As<ulong, BufferHandle>(ref handle);
+            get
+            {
+                ulong handle = _bufferHandle;
+                return Unsafe.As<ulong, BufferHandle>(ref handle);
+            }  
         }
 
-        public IntPtr Map(int offset, int mappingSize)
+        public nint Map(int offset, int mappingSize)
         {
             return _map;
         }
@@ -593,7 +410,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (_flushFence != null)
             {
-                var fence = _flushFence;
+                FenceHolder fence = _flushFence;
                 Interlocked.Increment(ref _flushWaiting);
 
                 // Don't wait in the lock.
@@ -623,16 +440,9 @@ namespace Ryujinx.Graphics.Vulkan
 
             WaitForFlushFence();
 
-            if (_lastFlushWrite != _writeCount)
-            {
-                // If it's on the same page as the last flush, ignore it.
-                _lastFlushWrite = _writeCount;
-                _flushCount++;
-            }
-
             Span<byte> result;
 
-            if (_map != IntPtr.Zero)
+            if (_map != nint.Zero)
             {
                 result = GetDataStorage(offset, size);
 
@@ -641,7 +451,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                 _flushLock.ExitReadLock();
 
-                return PinnedSpan<byte>.UnsafeFromSpan(result, _buffer.DecrementReferenceCount);
+                return PinnedSpan<byte>.UnsafeFromSpan(result, _decrementReferenceCount);
             }
 
             BackgroundResource resource = _gd.BackgroundResources.Get();
@@ -667,7 +477,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             int mappingSize = Math.Min(size, Size - offset);
 
-            if (_map != IntPtr.Zero)
+            if (_map != nint.Zero)
             {
                 return new Span<byte>((void*)(_map + offset), mappingSize);
             }
@@ -678,12 +488,12 @@ namespace Ryujinx.Graphics.Vulkan
         public bool RemoveOverlappingMirrors(int offset, int size)
         {
             List<ulong> toRemove = null;
-            foreach (var key in _mirrors.Keys)
+            foreach (ulong key in _mirrors.Keys)
             {
                 (int keyOffset, int keySize) = FromMirrorKey(key);
                 if (!(offset + size <= keyOffset || offset >= keyOffset + keySize))
                 {
-                    toRemove ??= new List<ulong>();
+                    toRemove ??= [];
 
                     toRemove.Add(key);
                 }
@@ -691,7 +501,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (toRemove != null)
             {
-                foreach (var key in toRemove)
+                foreach (ulong key in toRemove)
                 {
                     _mirrors.Remove(key);
                 }
@@ -710,10 +520,9 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            _setCount++;
-            bool allowMirror = _useMirrors && allowCbsWait && cbs != null && _currentType <= BufferAllocationType.HostMapped;
+            bool allowMirror = _useMirrors && allowCbsWait && cbs != null && _activeType <= BufferAllocationType.HostMapped;
 
-            if (_map != IntPtr.Zero)
+            if (_map != nint.Zero)
             {
                 // If persistently mapped, set the data directly if the buffer is not currently in use.
                 bool isRented = _buffer.HasRentedCommandBufferDependency(_gd.CommandBufferPool);
@@ -804,8 +613,8 @@ namespace Ryujinx.Graphics.Vulkan
                         BufferHolder srcHolder = _gd.BufferManager.Create(_gd, dataSize, baseType: BufferAllocationType.HostMapped);
                         srcHolder.SetDataUnchecked(0, data);
 
-                        var srcBuffer = srcHolder.GetBuffer();
-                        var dstBuffer = this.GetBuffer(cbs.Value.CommandBuffer, true);
+                        Auto<DisposableBuffer> srcBuffer = srcHolder.GetBuffer();
+                        Auto<DisposableBuffer> dstBuffer = this.GetBuffer(cbs.Value.CommandBuffer, true);
 
                         Copy(_gd, cbs.Value, srcBuffer, dstBuffer, 0, offset, dataSize);
 
@@ -828,7 +637,7 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            if (_map != IntPtr.Zero)
+            if (_map != nint.Zero)
             {
                 data[..dataSize].CopyTo(new Span<byte>((void*)(_map + offset), dataSize));
             }
@@ -836,6 +645,11 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _gd.BufferManager.StagingBuffer.PushData(_gd.CommandBufferPool, null, null, this, offset, data);
             }
+        }
+
+        public unsafe void SetDataUnchecked<T>(int offset, ReadOnlySpan<T> data) where T : unmanaged
+        {
+            SetDataUnchecked(offset, MemoryMarshal.AsBytes(data));
         }
 
         public void SetDataInline(CommandBufferScoped cbs, Action endRenderPass, int dstOffset, ReadOnlySpan<byte> data)
@@ -855,9 +669,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             endRenderPass?.Invoke();
 
-            var dstBuffer = GetBuffer(cbs.CommandBuffer, dstOffset, data.Length, true).Get(cbs, dstOffset, data.Length, true).Value;
-
-            _writeCount--;
+            VkBuffer dstBuffer = GetBuffer(cbs.CommandBuffer, dstOffset, data.Length, true).Get(cbs, dstOffset, data.Length, true).Value;
 
             InsertBufferBarrier(
                 _gd,
@@ -904,8 +716,8 @@ namespace Ryujinx.Graphics.Vulkan
             int size,
             bool registerSrcUsage = true)
         {
-            var srcBuffer = registerSrcUsage ? src.Get(cbs, srcOffset, size).Value : src.GetUnsafe().Value;
-            var dstBuffer = dst.Get(cbs, dstOffset, size, true).Value;
+            VkBuffer srcBuffer = registerSrcUsage ? src.Get(cbs, srcOffset, size).Value : src.GetUnsafe().Value;
+            VkBuffer dstBuffer = dst.Get(cbs, dstOffset, size, true).Value;
 
             InsertBufferBarrier(
                 gd,
@@ -918,7 +730,7 @@ namespace Ryujinx.Graphics.Vulkan
                 dstOffset,
                 size);
 
-            var region = new BufferCopy((ulong)srcOffset, (ulong)dstOffset, (ulong)size);
+            BufferCopy region = new((ulong)srcOffset, (ulong)dstOffset, (ulong)size);
 
             gd.Api.CmdCopyBuffer(cbs.CommandBuffer, srcBuffer, dstBuffer, 1, &region);
 
@@ -965,7 +777,7 @@ namespace Ryujinx.Graphics.Vulkan
                 0,
                 null,
                 1,
-                memoryBarrier,
+                in memoryBarrier,
                 0,
                 null);
         }
@@ -999,9 +811,9 @@ namespace Ryujinx.Graphics.Vulkan
                 return null;
             }
 
-            var key = new I8ToI16CacheKey(_gd);
+            I8ToI16CacheKey key = new(_gd);
 
-            if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out var holder))
+            if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out BufferHolder holder))
             {
                 holder = _gd.BufferManager.Create(_gd, (size * 2 + 3) & ~3, baseType: BufferAllocationType.DeviceLocal);
 
@@ -1023,9 +835,9 @@ namespace Ryujinx.Graphics.Vulkan
                 return null;
             }
 
-            var key = new AlignedVertexBufferCacheKey(_gd, stride, alignment);
+            AlignedVertexBufferCacheKey key = new(_gd, stride, alignment);
 
-            if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out var holder))
+            if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out BufferHolder holder))
             {
                 int alignedStride = (stride + (alignment - 1)) & -alignment;
 
@@ -1049,9 +861,9 @@ namespace Ryujinx.Graphics.Vulkan
                 return null;
             }
 
-            var key = new TopologyConversionCacheKey(_gd, pattern, indexSize);
+            TopologyConversionCacheKey key = new(_gd, pattern, indexSize);
 
-            if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out var holder))
+            if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out BufferHolder holder))
             {
                 // The destination index size is always I32.
 
@@ -1094,8 +906,6 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Dispose()
         {
-            _swapQueued = false;
-
             _gd.PipelineInternal?.FlushCommandsIfWeightExceeding(_buffer, (ulong)Size);
 
             _buffer.Dispose();

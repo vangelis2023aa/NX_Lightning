@@ -51,10 +51,12 @@ namespace Ryujinx.Memory.Tracking
 
         private event Action OnDirty;
 
-        private readonly object _preActionLock = new();
+        private readonly Lock _preActionLock = new();
         private RegionSignal _preAction; // Action to perform before a read or write. This will block the memory access.
         private PreciseRegionSignal _preciseAction; // Action to perform on a precise read or write.
         private readonly List<VirtualRegion> _regions;
+        private readonly List<VirtualRegion> _guestRegions;
+        private readonly List<VirtualRegion> _allRegions;
         private readonly MemoryTracking _tracking;
         private bool _disposed;
 
@@ -99,6 +101,7 @@ namespace Ryujinx.Memory.Tracking
         /// <param name="bitmap">The bitmap the dirty flag for this handle is stored in</param>
         /// <param name="bit">The bit index representing the dirty flag for this handle</param>
         /// <param name="id">Handle ID</param>
+        /// <param name="flags">Region flags</param>
         /// <param name="mapped">True if the region handle starts mapped</param>
         internal RegionHandle(
             MemoryTracking tracking,
@@ -109,6 +112,7 @@ namespace Ryujinx.Memory.Tracking
             ConcurrentBitmap bitmap,
             int bit,
             int id,
+            RegionFlags flags,
             bool mapped = true)
         {
             Bitmap = bitmap;
@@ -128,11 +132,12 @@ namespace Ryujinx.Memory.Tracking
             RealEndAddress = realAddress + realSize;
 
             _tracking = tracking;
-            _regions = tracking.GetVirtualRegionsForHandle(address, size);
-            foreach (var region in _regions)
-            {
-                region.Handles.Add(this);
-            }
+
+            _regions = tracking.GetVirtualRegionsForHandle(address, size, false);
+            _guestRegions = GetGuestRegions(tracking, address, size, flags);
+            _allRegions = new List<VirtualRegion>(_regions.Count + _guestRegions.Count);
+
+            InitializeRegions();
         }
 
         /// <summary>
@@ -145,8 +150,9 @@ namespace Ryujinx.Memory.Tracking
         /// <param name="realAddress">The real, unaligned address of the handle</param>
         /// <param name="realSize">The real, unaligned size of the handle</param>
         /// <param name="id">Handle ID</param>
+        /// <param name="flags">Region flags</param>
         /// <param name="mapped">True if the region handle starts mapped</param>
-        internal RegionHandle(MemoryTracking tracking, ulong address, ulong size, ulong realAddress, ulong realSize, int id, bool mapped = true)
+        internal RegionHandle(MemoryTracking tracking, ulong address, ulong size, ulong realAddress, ulong realSize, int id, RegionFlags flags, bool mapped = true)
         {
             Bitmap = new ConcurrentBitmap(1, mapped);
 
@@ -163,8 +169,37 @@ namespace Ryujinx.Memory.Tracking
             RealEndAddress = realAddress + realSize;
 
             _tracking = tracking;
-            _regions = tracking.GetVirtualRegionsForHandle(address, size);
-            foreach (var region in _regions)
+
+            _regions = tracking.GetVirtualRegionsForHandle(address, size, false);
+            _guestRegions = GetGuestRegions(tracking, address, size, flags);
+            _allRegions = new List<VirtualRegion>(_regions.Count + _guestRegions.Count);
+
+            InitializeRegions();
+        }
+
+        private static List<VirtualRegion> GetGuestRegions(MemoryTracking tracking, ulong address, ulong size, RegionFlags flags)
+        {
+            ulong guestAddress;
+            ulong guestSize;
+
+            if (flags.HasFlag(RegionFlags.UnalignedAccess))
+            {
+                (guestAddress, guestSize) = tracking.GetUnalignedSafeRegion(address, size);
+            }
+            else
+            {
+                (guestAddress, guestSize) = (address, size);
+            }
+
+            return tracking.GetVirtualRegionsForHandle(guestAddress, guestSize, true);
+        }
+
+        private void InitializeRegions()
+        {
+            _allRegions.AddRange(_regions);
+            _allRegions.AddRange(_guestRegions);
+
+            foreach (VirtualRegion region in _allRegions)
             {
                 region.Handles.Add(this);
             }
@@ -182,8 +217,8 @@ namespace Ryujinx.Memory.Tracking
         {
             // Assumes the tracking lock is held, so nothing else can signal right now.
 
-            var oldBitmap = Bitmap;
-            var oldBit = DirtyBit;
+            ConcurrentBitmap oldBitmap = Bitmap;
+            int oldBit = DirtyBit;
 
             bitmap.Set(bit, Dirty);
 
@@ -270,6 +305,7 @@ namespace Ryujinx.Memory.Tracking
                 {
                     OnDirty?.Invoke();
                 }
+
                 Parent?.SignalWrite();
             }
         }
@@ -321,7 +357,7 @@ namespace Ryujinx.Memory.Tracking
 
             lock (_tracking.TrackingLock)
             {
-                foreach (VirtualRegion region in _regions)
+                foreach (VirtualRegion region in _allRegions)
                 {
                     protectionChanged |= region.UpdateProtection();
                 }
@@ -379,7 +415,7 @@ namespace Ryujinx.Memory.Tracking
                 {
                     lock (_tracking.TrackingLock)
                     {
-                        foreach (VirtualRegion region in _regions)
+                        foreach (VirtualRegion region in _allRegions)
                         {
                             region.UpdateProtection();
                         }
@@ -414,7 +450,16 @@ namespace Ryujinx.Memory.Tracking
         /// <param name="region">Virtual region to add as a child</param>
         internal void AddChild(VirtualRegion region)
         {
-            _regions.Add(region);
+            if (region.Guest)
+            {
+                _guestRegions.Add(region);
+            }
+            else
+            {
+                _regions.Add(region);
+            }
+
+            _allRegions.Add(region);
         }
 
         /// <summary>
@@ -469,7 +514,7 @@ namespace Ryujinx.Memory.Tracking
 
             lock (_tracking.TrackingLock)
             {
-                foreach (VirtualRegion region in _regions)
+                foreach (VirtualRegion region in _allRegions)
                 {
                     region.RemoveHandle(this);
                 }

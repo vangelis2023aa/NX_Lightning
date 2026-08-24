@@ -31,7 +31,7 @@ namespace ARMeilleure.Instructions
         {
             Debug.Assert(type != OperandType.V128);
 
-            if (type == OperandType.FP64 || type == OperandType.I64)
+            if (type is OperandType.FP64 or OperandType.I64)
             {
                 // From dreg.
                 return context.VectorExtract(type, GetVecA32(reg >> 1), reg & 1);
@@ -48,7 +48,7 @@ namespace ARMeilleure.Instructions
             Debug.Assert(value.Type != OperandType.V128);
 
             Operand vec, insert;
-            if (value.Type == OperandType.FP64 || value.Type == OperandType.I64)
+            if (value.Type is OperandType.FP64 or OperandType.I64)
             {
                 // From dreg.
                 vec = GetVecA32(reg >> 1);
@@ -71,7 +71,7 @@ namespace ARMeilleure.Instructions
 
         public static void InsertScalar16(ArmEmitterContext context, int reg, bool top, Operand value)
         {
-            Debug.Assert(value.Type == OperandType.FP32 || value.Type == OperandType.I32);
+            Debug.Assert(value.Type is OperandType.FP32 or OperandType.I32);
 
             Operand vec, insert;
             vec = GetVecA32(reg >> 2);
@@ -673,6 +673,35 @@ namespace ARMeilleure.Instructions
             context.Copy(GetVecA32(op.Qd), res);
         }
 
+        public static void EmitVectorPairwiseTernaryLongOpI32(ArmEmitterContext context, Func3I emit, bool signed)
+        {
+            OpCode32Simd op = (OpCode32Simd)context.CurrOp;
+
+            int elems = op.GetBytesCount() >> op.Size;
+            int pairs = elems >> 1;
+
+            Operand res = GetVecA32(op.Qd);
+
+            for (int index = 0; index < pairs; index++)
+            {
+                int pairIndex = index * 2;
+                Operand m1 = EmitVectorExtract32(context, op.Qm, op.Im + pairIndex, op.Size, signed);
+                Operand m2 = EmitVectorExtract32(context, op.Qm, op.Im + pairIndex + 1, op.Size, signed);
+
+                if (op.Size == 2)
+                {
+                    m1 = signed ? context.SignExtend32(OperandType.I64, m1) : context.ZeroExtend32(OperandType.I64, m1);
+                    m2 = signed ? context.SignExtend32(OperandType.I64, m2) : context.ZeroExtend32(OperandType.I64, m2);
+                }
+
+                Operand d1 = EmitVectorExtract32(context, op.Qd, op.Id + index, op.Size + 1, signed);
+
+                res = EmitVectorInsert(context, res, emit(m1, m2, d1), op.Id + index, op.Size + 1);
+            }
+
+            context.Copy(GetVecA32(op.Qd), res);
+        }
+
         // Narrow
 
         public static void EmitVectorUnaryNarrowOp32(ArmEmitterContext context, Func1I emit, bool signed = false)
@@ -851,6 +880,7 @@ namespace ARMeilleure.Instructions
                 {
                     res = EmitMoveDoubleWordToSide(context, res, side, op.Vd);
                 }
+
                 res = EmitDoubleWordInsert(context, d, res, op.Vd);
             }
 

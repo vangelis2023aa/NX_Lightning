@@ -15,8 +15,6 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 {
     class SurfaceFlinger : IConsumerListener, IDisposable
     {
-        private const int TargetFps = 60;
-
         private readonly Switch _device;
 
         private readonly Dictionary<long, Layer> _layers;
@@ -32,10 +30,13 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
         private readonly long _spinTicks;
         private readonly long _1msTicks;
 
+        private VSyncMode _vSyncMode;
+        private long _targetVSyncInterval;
+
         private int _swapInterval;
         private int _swapIntervalDelay;
 
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
 
         public long RenderLayerId { get; private set; }
 
@@ -79,6 +80,7 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
         private void UpdateSwapInterval(int swapInterval)
         {
             _swapInterval = swapInterval;
+            _device.Gpu.Window.SetUnboundedPresentMode(_swapInterval == 0);
 
             // If the swap interval is 0, Game VSync is disabled.
             if (_swapInterval == 0)
@@ -88,7 +90,8 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
             }
             else
             {
-                _ticksPerFrame = Stopwatch.Frequency / TargetFps;
+                _ticksPerFrame = ((Stopwatch.Frequency / _device.TargetVSyncInterval) * 100) / _device.TickScalar;
+                _targetVSyncInterval = _device.TargetVSyncInterval;
             }
         }
 
@@ -186,7 +189,7 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
                     return Vi.ResultCode.InvalidValue;
                 }
 
-                if (layer.State != LayerState.ManagedClosed && layer.State != LayerState.ManagedOpened)
+                if (layer.State is not LayerState.ManagedClosed and not LayerState.ManagedOpened)
                 {
                     Logger.Error?.Print(LogClass.SurfaceFlinger, $"Failed to destroy managed layer {layerId} (permission denied)");
 
@@ -370,22 +373,27 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 
                 if (acquireStatus == Status.Success)
                 {
-                    // If device vsync is disabled, reflect the change.
-                    if (!_device.EnableDeviceVsync)
+                    if (_device.VSyncMode == VSyncMode.Unbounded)
                     {
                         if (_swapInterval != 0)
                         {
                             UpdateSwapInterval(0);
+                            _vSyncMode = _device.VSyncMode;
                         }
                     }
-                    else if (item.SwapInterval != _swapInterval)
+                    else if (_device.VSyncMode != _vSyncMode)
+                    {
+                        UpdateSwapInterval(_device.VSyncMode == VSyncMode.Unbounded ? 0 : item.SwapInterval);
+                        _vSyncMode = _device.VSyncMode;
+                    }
+                    else if (item.SwapInterval != _swapInterval || _device.TargetVSyncInterval != _targetVSyncInterval)
                     {
                         UpdateSwapInterval(item.SwapInterval);
                     }
 
                     PostFrameBuffer(layer, item);
                 }
-                else if (acquireStatus != Status.NoBufferAvailaible && acquireStatus != Status.InvalidOperation)
+                else if (acquireStatus is not Status.NoBufferAvailaible and not Status.InvalidOperation)
                 {
                     throw new InvalidOperationException();
                 }
@@ -412,9 +420,9 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 
             Format format = ConvertColorFormat(item.GraphicBuffer.Object.Buffer.Surfaces[0].ColorFormat);
 
-            int bytesPerPixel =
-                format == Format.B5G6R5Unorm ||
-                format == Format.R4G4B4A4Unorm ? 2 : 4;
+            byte bytesPerPixel =
+                format is Format.B5G6R5Unorm or
+                Format.R4G4B4A4Unorm ? (byte)2 : (byte)4;
 
             int gobBlocksInY = 1 << item.GraphicBuffer.Object.Buffer.Surfaces[0].BlockHeightLog2;
 

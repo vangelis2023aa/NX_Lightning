@@ -1,5 +1,6 @@
 using Ryujinx.Common;
 using Ryujinx.Common.Logging;
+using Ryujinx.Graphics.GAL;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -29,6 +30,9 @@ namespace Ryujinx.Graphics.Vulkan
 
         private readonly VulkanRenderer _gd;
         private readonly BufferHolder _buffer;
+        private readonly int _resourceAlignment;
+
+        public readonly BufferHandle Handle;
 
         private readonly struct PendingCopy
         {
@@ -48,9 +52,16 @@ namespace Ryujinx.Graphics.Vulkan
         public StagingBuffer(VulkanRenderer gd, BufferManager bufferManager)
         {
             _gd = gd;
-            _buffer = bufferManager.Create(gd, BufferSize);
+            Handle = bufferManager.CreateWithHandle(gd, BufferSize, out _buffer);
             _pendingCopies = new Queue<PendingCopy>();
             _freeSize = BufferSize;
+            _resourceAlignment = (int)gd.Capabilities.MinResourceAlignment;
+
+            // Track staging buffer memory allocation
+            if (MemoryProfiler.IsEnabled)
+            {
+                MemoryProfiler.AddStagingMemory(BufferSize);
+            }
         }
 
         public void PushData(CommandBufferPool cbp, CommandBufferScoped? cbs, Action endRenderPass, BufferHolder dst, int dstOffset, ReadOnlySpan<byte> data)
@@ -102,8 +113,8 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void PushDataImpl(CommandBufferScoped cbs, BufferHolder dst, int dstOffset, ReadOnlySpan<byte> data)
         {
-            var srcBuffer = _buffer.GetBuffer();
-            var dstBuffer = dst.GetBuffer(cbs.CommandBuffer, dstOffset, data.Length, true);
+            Auto<DisposableBuffer> srcBuffer = _buffer.GetBuffer();
+            Auto<DisposableBuffer> dstBuffer = dst.GetBuffer(cbs.CommandBuffer, dstOffset, data.Length, true);
 
             int offset = _freeOffset;
             int capacity = BufferSize - offset;
@@ -197,7 +208,7 @@ namespace Ryujinx.Graphics.Vulkan
         /// Reserve a range on the staging buffer for the current command buffer and upload data to it.
         /// </summary>
         /// <param name="cbs">Command buffer to reserve the data on</param>
-        /// <param name="data">The data to upload</param>
+        /// <param name="size">The minimum size the reserved data requires</param>
         /// <param name="alignment">The required alignment for the buffer offset</param>
         /// <returns>The reserved range of the staging buffer</returns>
         public unsafe StagingBufferReserved? TryReserveData(CommandBufferScoped cbs, int size, int alignment)
@@ -223,9 +234,21 @@ namespace Ryujinx.Graphics.Vulkan
             return ReserveDataImpl(cbs, size, alignment);
         }
 
+        /// <summary>
+        /// Reserve a range on the staging buffer for the current command buffer and upload data to it.
+        /// Uses the most permissive byte alignment.
+        /// </summary>
+        /// <param name="cbs">Command buffer to reserve the data on</param>
+        /// <param name="size">The minimum size the reserved data requires</param>
+        /// <returns>The reserved range of the staging buffer</returns>
+        public unsafe StagingBufferReserved? TryReserveData(CommandBufferScoped cbs, int size)
+        {
+            return TryReserveData(cbs, size, _resourceAlignment);
+        }
+
         private bool WaitFreeCompleted(CommandBufferPool cbp)
         {
-            if (_pendingCopies.TryPeek(out var pc))
+            if (_pendingCopies.TryPeek(out PendingCopy pc))
             {
                 if (!pc.Fence.IsSignaled())
                 {
@@ -237,7 +260,7 @@ namespace Ryujinx.Graphics.Vulkan
                     pc.Fence.Wait();
                 }
 
-                var dequeued = _pendingCopies.Dequeue();
+                PendingCopy dequeued = _pendingCopies.Dequeue();
                 Debug.Assert(dequeued.Fence == pc.Fence);
                 _freeSize += pc.Size;
                 pc.Fence.Put();
@@ -249,10 +272,10 @@ namespace Ryujinx.Graphics.Vulkan
         public void FreeCompleted()
         {
             FenceHolder signalledFence = null;
-            while (_pendingCopies.TryPeek(out var pc) && (pc.Fence == signalledFence || pc.Fence.IsSignaled()))
+            while (_pendingCopies.TryPeek(out PendingCopy pc) && (pc.Fence == signalledFence || pc.Fence.IsSignaled()))
             {
                 signalledFence = pc.Fence; // Already checked - don't need to do it again.
-                var dequeued = _pendingCopies.Dequeue();
+                PendingCopy dequeued = _pendingCopies.Dequeue();
                 Debug.Assert(dequeued.Fence == pc.Fence);
                 _freeSize += pc.Size;
                 pc.Fence.Put();
@@ -263,9 +286,15 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (disposing)
             {
-                _buffer.Dispose();
+                _gd.BufferManager.Delete(Handle);
 
-                while (_pendingCopies.TryDequeue(out var pc))
+                // Track staging buffer memory deallocation
+                if (MemoryProfiler.IsEnabled)
+                {
+                    MemoryProfiler.RemoveStagingMemory(BufferSize);
+                }
+
+                while (_pendingCopies.TryDequeue(out PendingCopy pc))
                 {
                     pc.Fence.Put();
                 }

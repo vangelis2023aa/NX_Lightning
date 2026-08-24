@@ -83,7 +83,7 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
             Instruction inst = operation.Inst;
             StorageKind storageKind = operation.StorageKind;
 
-            if (inst == Instruction.Load || inst == Instruction.Store)
+            if (inst is Instruction.Load or Instruction.Store)
             {
                 if (storageKind.IsInputOrOutput())
                 {
@@ -169,7 +169,17 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
 
             AstTextureOperation GetAstTextureOperation(TextureOperation texOp)
             {
-                return new AstTextureOperation(inst, texOp.Type, texOp.Format, texOp.Flags, texOp.Binding, texOp.Index, sources);
+                return new AstTextureOperation(
+                    inst,
+                    texOp.Type,
+                    texOp.Format,
+                    texOp.Flags,
+                    texOp.Set,
+                    texOp.Binding,
+                    texOp.SamplerSet,
+                    texOp.SamplerBinding,
+                    texOp.Index,
+                    sources);
             }
 
             int componentsCount = BitOperations.PopCount((uint)operation.Index);
@@ -226,7 +236,8 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
 
                     dest.VarType = destElemType;
 
-                    context.AddNode(new AstAssignment(dest, new AstOperation(Instruction.VectorExtract, StorageKind.None, false, new[] { destVec, index }, 2)));
+                    context.AddNode(new AstAssignment(dest, new AstOperation(Instruction.VectorExtract, StorageKind.None, false,
+                        [destVec, index], 2)));
                 }
             }
             else if (operation.Dest != null)
@@ -333,7 +344,7 @@ namespace Ryujinx.Graphics.Shader.StructuredIr
 
         private static AggregateType GetVarTypeFromUses(Operand dest)
         {
-            HashSet<Operand> visited = new();
+            HashSet<Operand> visited = [];
 
             Queue<Operand> pending = new();
 

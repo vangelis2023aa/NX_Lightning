@@ -1,6 +1,5 @@
 using ARMeilleure;
 using ARMeilleure.State;
-using ARMeilleure.Translation;
 using NUnit.Framework;
 using Ryujinx.Cpu.Jit;
 using Ryujinx.Memory;
@@ -14,11 +13,8 @@ namespace Ryujinx.Tests.Cpu
     public class CpuTest32
     {
         protected static readonly uint Size = (uint)MemoryBlock.GetPageSize();
-#pragma warning disable CA2211 // Non-constant fields should not be visible
-        protected static uint CodeBaseAddress = Size;
-        protected static uint DataBaseAddress = CodeBaseAddress + Size;
-#pragma warning restore CA2211
-
+        protected static uint CodeBaseAddress { get; set; } = Size;
+        protected static uint DataBaseAddress { get; set; } = CodeBaseAddress + Size;
         private uint _currAddress;
 
         private MemoryBlock _ram;
@@ -56,7 +52,6 @@ namespace Ryujinx.Tests.Cpu
 
             _context = CpuContext.CreateExecutionContext();
             _context.IsAarch32 = true;
-            Translator.IsReadyForTranslation.Set();
 
             _cpuContext = new CpuContext(_memory, for64Bit: false);
 
@@ -297,7 +292,7 @@ namespace Ryujinx.Tests.Cpu
                 FinalRegs = test.FinalRegs,
             });
 
-            foreach (var (address, value) in test.MemoryDelta)
+            foreach ((ulong address, ushort value) in test.MemoryDelta)
             {
                 testMem[address - DataBaseAddress + 0] = (byte)(value >> 0);
                 testMem[address - DataBaseAddress + 1] = (byte)(value >> 8);
@@ -423,6 +418,7 @@ namespace Ryujinx.Tests.Cpu
             {
                 ManageFpTolerances(fpTolerances);
             }
+
             Assert.That(V128ToSimdValue(_context.GetV(1)), Is.EqualTo(_unicornEmu.Q[1]), "V1");
             Assert.That(V128ToSimdValue(_context.GetV(2)), Is.EqualTo(_unicornEmu.Q[2]), "V2");
             Assert.That(V128ToSimdValue(_context.GetV(3)), Is.EqualTo(_unicornEmu.Q[3]), "V3");

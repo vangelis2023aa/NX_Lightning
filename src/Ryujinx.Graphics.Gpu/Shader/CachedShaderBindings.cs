@@ -2,7 +2,6 @@ using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Engine;
 using Ryujinx.Graphics.Gpu.Image;
 using Ryujinx.Graphics.Shader;
-using System;
 using System.Linq;
 
 namespace Ryujinx.Graphics.Gpu.Shader
@@ -16,6 +15,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
         public TextureBindingInfo[][] ImageBindings { get; }
         public BufferDescriptor[][] ConstantBufferBindings { get; }
         public BufferDescriptor[][] StorageBufferBindings { get; }
+
+        public int[] TextureCounts { get; }
 
         public int MaxTextureBinding { get; }
         public int MaxImageBinding { get; }
@@ -34,6 +35,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
             ConstantBufferBindings = new BufferDescriptor[stageCount][];
             StorageBufferBindings = new BufferDescriptor[stageCount][];
 
+            TextureCounts = new int[stageCount];
+
             int maxTextureBinding = -1;
             int maxImageBinding = -1;
             int offset = isCompute ? 0 : 1;
@@ -44,28 +47,36 @@ namespace Ryujinx.Graphics.Gpu.Shader
 
                 if (stage == null)
                 {
-                    TextureBindings[i] = Array.Empty<TextureBindingInfo>();
-                    ImageBindings[i] = Array.Empty<TextureBindingInfo>();
-                    ConstantBufferBindings[i] = Array.Empty<BufferDescriptor>();
-                    StorageBufferBindings[i] = Array.Empty<BufferDescriptor>();
+                    TextureBindings[i] = [];
+                    ImageBindings[i] = [];
+                    ConstantBufferBindings[i] = [];
+                    StorageBufferBindings[i] = [];
 
                     continue;
                 }
 
                 TextureBindings[i] = stage.Info.Textures.Select(descriptor =>
                 {
-                    Target target = ShaderTexture.GetTarget(descriptor.Type);
+                    Target target = descriptor.Type != SamplerType.None ? ShaderTexture.GetTarget(descriptor.Type) : default;
 
-                    var result = new TextureBindingInfo(
+                    TextureBindingInfo result = new(
                         target,
+                        descriptor.Set,
                         descriptor.Binding,
+                        descriptor.ArrayLength,
                         descriptor.CbufSlot,
                         descriptor.HandleIndex,
-                        descriptor.Flags);
+                        descriptor.Flags,
+                        descriptor.Type == SamplerType.None);
 
-                    if (descriptor.Binding > maxTextureBinding)
+                    if (descriptor.ArrayLength <= 1)
                     {
-                        maxTextureBinding = descriptor.Binding;
+                        if (descriptor.Binding > maxTextureBinding)
+                        {
+                            maxTextureBinding = descriptor.Binding;
+                        }
+
+                        TextureCounts[i]++;
                     }
 
                     return result;
@@ -74,17 +85,19 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 ImageBindings[i] = stage.Info.Images.Select(descriptor =>
                 {
                     Target target = ShaderTexture.GetTarget(descriptor.Type);
-                    Format format = ShaderTexture.GetFormat(descriptor.Format);
+                    FormatInfo formatInfo = ShaderTexture.GetFormatInfo(descriptor.Format);
 
-                    var result = new TextureBindingInfo(
+                    TextureBindingInfo result = new(
                         target,
-                        format,
+                        formatInfo,
+                        descriptor.Set,
                         descriptor.Binding,
+                        descriptor.ArrayLength,
                         descriptor.CbufSlot,
                         descriptor.HandleIndex,
                         descriptor.Flags);
 
-                    if (descriptor.Binding > maxImageBinding)
+                    if (descriptor.ArrayLength <= 1 && descriptor.Binding > maxImageBinding)
                     {
                         maxImageBinding = descriptor.Binding;
                     }

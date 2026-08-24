@@ -4,14 +4,15 @@ using Silk.NET.Vulkan;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace Ryujinx.Graphics.Vulkan.Queries
 {
     class BufferedQuery : IDisposable
     {
         private const int MaxQueryRetries = 5000;
-        private const long DefaultValue = -1;
-        private const long DefaultValueInt = 0xFFFFFFFF;
+        private const long DefaultValue = unchecked((long)0xFFFFFFFEFFFFFFFE);
+        private const long DefaultValueInt = 0xFFFFFFFE;
         private const ulong HighMask = 0xFFFFFFFF00000000;
 
         private readonly Vk _api;
@@ -21,7 +22,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         private QueryPool _queryPool;
 
         private readonly BufferHolder _buffer;
-        private readonly IntPtr _bufferMap;
+        private readonly nint _bufferMap;
         private readonly CounterType _type;
         private readonly bool _result32Bit;
         private readonly bool _isSupported;
@@ -44,7 +45,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                 QueryPipelineStatisticFlags flags = type == CounterType.PrimitivesGenerated ?
                     QueryPipelineStatisticFlags.GeometryShaderPrimitivesBit : 0;
 
-                var queryPoolCreateInfo = new QueryPoolCreateInfo
+                QueryPoolCreateInfo queryPoolCreateInfo = new()
                 {
                     SType = StructureType.QueryPoolCreateInfo,
                     QueryCount = 1,
@@ -52,10 +53,10 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                     PipelineStatistics = flags,
                 };
 
-                gd.Api.CreateQueryPool(device, queryPoolCreateInfo, null, out _queryPool).ThrowOnError();
+                gd.Api.CreateQueryPool(device, in queryPoolCreateInfo, null, out _queryPool).ThrowOnError();
             }
 
-            var buffer = gd.BufferManager.Create(gd, sizeof(long), forConditionalRendering: true);
+            BufferHolder buffer = gd.BufferManager.Create(gd, sizeof(long), forConditionalRendering: true);
 
             _bufferMap = buffer.Map(0, sizeof(long));
             _defaultValue = result32Bit ? DefaultValueInt : DefaultValue;
@@ -104,6 +105,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                 bool isOcclusion = _type == CounterType.SamplesPassed;
                 _pipeline.BeginQuery(this, _queryPool, needsReset, isOcclusion, isOcclusion && resetSequence != null);
             }
+
             _resetSequence = null;
         }
 
@@ -145,9 +147,15 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
             if (wakeSignal == null)
             {
-                while (WaitingForValue(data))
+                int iterations = 0;
+                while (WaitingForValue(data) && iterations++ < MaxQueryRetries)
                 {
                     data = Marshal.ReadInt64(_bufferMap);
+                }
+
+                if (iterations >= MaxQueryRetries)
+                {
+                    Logger.Error?.Print(LogClass.Gpu, $"Error: Query result {_type} timed out. Took more than {MaxQueryRetries} tries.");
                 }
             }
             else
@@ -183,7 +191,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
         public void PoolCopy(CommandBufferScoped cbs)
         {
-            var buffer = _buffer.GetBuffer(cbs.CommandBuffer, true).Get(cbs, 0, sizeof(long), true).Value;
+            Buffer buffer = _buffer.GetBuffer(cbs.CommandBuffer, true).Get(cbs, 0, sizeof(long), true).Value;
 
             QueryResultFlags flags = QueryResultFlags.ResultWaitBit;
 
@@ -210,6 +218,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             {
                 _api.DestroyQueryPool(_device, _queryPool, null);
             }
+
             _queryPool = default;
         }
     }

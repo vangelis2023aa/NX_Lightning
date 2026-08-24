@@ -180,8 +180,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// </summary>
         public void ClearCache()
         {
-            using var tocFileStream = DiskCacheCommon.OpenFile(_basePath, TocFileName, writable: true);
-            using var dataFileStream = DiskCacheCommon.OpenFile(_basePath, DataFileName, writable: true);
+            using FileStream tocFileStream = DiskCacheCommon.OpenFile(_basePath, TocFileName, writable: true);
+            using FileStream dataFileStream = DiskCacheCommon.OpenFile(_basePath, DataFileName, writable: true);
 
             tocFileStream.SetLength(0);
             dataFileStream.SetLength(0);
@@ -220,7 +220,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
                 }
 
                 dataFileStream.Seek((long)entry.Offset, SeekOrigin.Begin);
-                dataFileStream.Read(cb1Data);
+                dataFileStream.ReadExactly(cb1Data);
                 BinarySerializer.ReadCompressed(dataFileStream, guestCode);
 
                 _cache[index] = (guestCode, cb1Data);
@@ -258,8 +258,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <returns>Index of the shader on the cache</returns>
         public int AddShader(ReadOnlySpan<byte> data, ReadOnlySpan<byte> cb1Data)
         {
-            using var tocFileStream = DiskCacheCommon.OpenFile(_basePath, TocFileName, writable: true);
-            using var dataFileStream = DiskCacheCommon.OpenFile(_basePath, DataFileName, writable: true);
+            using FileStream tocFileStream = DiskCacheCommon.OpenFile(_basePath, TocFileName, writable: true);
+            using FileStream dataFileStream = DiskCacheCommon.OpenFile(_basePath, DataFileName, writable: true);
 
             TocHeader header = new();
 
@@ -267,9 +267,9 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
 
             uint hash = CalcHash(data, cb1Data);
 
-            if (_toc.TryGetValue(hash, out var list))
+            if (_toc.TryGetValue(hash, out List<TocMemoryEntry> list))
             {
-                foreach (var entry in list)
+                foreach (TocMemoryEntry entry in list)
                 {
                     if (data.Length != entry.CodeSize || cb1Data.Length != entry.Cb1DataSize)
                     {
@@ -279,7 +279,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
                     dataFileStream.Seek((long)entry.Offset, SeekOrigin.Begin);
                     byte[] cachedCode = new byte[entry.CodeSize];
                     byte[] cachedCb1Data = new byte[entry.Cb1DataSize];
-                    dataFileStream.Read(cachedCb1Data);
+                    dataFileStream.ReadExactly(cachedCb1Data);
                     BinarySerializer.ReadCompressed(dataFileStream, cachedCode);
 
                     if (data.SequenceEqual(cachedCode) && cb1Data.SequenceEqual(cachedCb1Data))
@@ -379,8 +379,8 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <param name="hash">Code and constant buffer data hash</param>
         /// <returns>Entry index</returns>
         private int WriteNewEntry(
-            Stream tocFileStream,
-            Stream dataFileStream,
+            FileStream tocFileStream,
+            FileStream dataFileStream,
             ref TocHeader header,
             ReadOnlySpan<byte> data,
             ReadOnlySpan<byte> cb1Data,
@@ -427,9 +427,9 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <param name="index">Index of the data on the cache</param>
         private void AddTocMemoryEntry(uint dataOffset, uint codeSize, uint cb1DataSize, uint hash, int index)
         {
-            if (!_toc.TryGetValue(hash, out var list))
+            if (!_toc.TryGetValue(hash, out List<TocMemoryEntry> list))
             {
-                _toc.Add(hash, list = new List<TocMemoryEntry>());
+                _toc.Add(hash, list = []);
             }
 
             list.Add(new TocMemoryEntry(dataOffset, codeSize, cb1DataSize, index));
@@ -453,7 +453,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// <returns>Hash of the data</returns>
         private static uint CalcHash(ReadOnlySpan<byte> data)
         {
-            return (uint)XXHash128.ComputeHash(data).Low;
+            return (uint)Hash128.ComputeHash(data).Low;
         }
     }
 }

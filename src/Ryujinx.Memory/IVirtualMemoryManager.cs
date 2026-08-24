@@ -8,10 +8,10 @@ namespace Ryujinx.Memory
     public interface IVirtualMemoryManager
     {
         /// <summary>
-        /// Indicates whenever the memory manager supports aliasing pages at 4KB granularity.
+        /// Indicates whether the memory manager creates private allocations when the <see cref="MemoryMapFlags.Private"/> flag is set on map.
         /// </summary>
-        /// <returns>True if 4KB pages are supported by the memory manager, false otherwise</returns>
-        bool Supports4KBPages { get; }
+        /// <returns>True if private mappings might be used, false otherwise</returns>
+        bool UsesPrivateAllocations { get; }
 
         /// <summary>
         /// Maps a virtual memory range into a physical memory range.
@@ -60,6 +60,15 @@ namespace Ryujinx.Memory
         /// <param name="data">Span to store the data being read into</param>
         /// <exception cref="InvalidMemoryRegionException">Throw for unhandled invalid or unmapped memory accesses</exception>
         void Read(ulong va, Span<byte> data);
+        
+        /// <summary>
+        /// Gets a span of CPU mapped memory.
+        /// </summary>
+        /// <param name="va">Virtual address of the data in memory</param>
+        /// <param name="length">Length of the data in memory</param>
+        /// <param name="data">Span that references the data being read</param>
+        /// <exception cref="InvalidMemoryRegionException">Throw for unhandled invalid or unmapped memory accesses</exception>
+        bool TryReadUnsafe(ulong va, int length, out Span<byte> data);
 
         /// <summary>
         /// Writes data to CPU mapped memory.
@@ -118,11 +127,21 @@ namespace Ryujinx.Memory
             {
                 int copySize = (int)Math.Min(MaxChunkSize, size - subOffset);
 
-                using var writableRegion = GetWritableRegion(va + subOffset, copySize);
+                using WritableRegion writableRegion = GetWritableRegion(va + subOffset, copySize);
 
                 writableRegion.Memory.Span.Fill(value);
             }
         }
+
+        /// <summary>
+        /// Gets a read-only sequence of read-only memory blocks from CPU mapped memory.
+        /// </summary>
+        /// <param name="va">Virtual address of the data</param>
+        /// <param name="size">Size of the data</param>
+        /// <param name="tracked">True if read tracking is triggered on the memory</param>
+        /// <returns>A read-only sequence of read-only memory of the data</returns>
+        /// <exception cref="InvalidMemoryRegionException">Throw for unhandled invalid or unmapped memory accesses</exception>
+        ReadOnlySequence<byte> GetReadOnlySequence(ulong va, int size, bool tracked = false);
 
         /// <summary>
         /// Gets a read-only span of data from CPU mapped memory.
@@ -214,6 +233,7 @@ namespace Ryujinx.Memory
         /// <param name="va">Virtual address base</param>
         /// <param name="size">Size of the region to protect</param>
         /// <param name="protection">Memory protection to set</param>
-        void TrackingReprotect(ulong va, ulong size, MemoryPermission protection);
+        /// <param name="guest">True if the protection is for guest access, false otherwise</param>
+        void TrackingReprotect(ulong va, ulong size, MemoryPermission protection, bool guest);
     }
 }

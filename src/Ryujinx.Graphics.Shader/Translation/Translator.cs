@@ -110,8 +110,8 @@ namespace Ryujinx.Graphics.Shader.Translation
 
                 for (int tfbIndex = 0; tfbIndex < 4; tfbIndex++)
                 {
-                    var locations = gpuAccessor.QueryTransformFeedbackVaryingLocations(tfbIndex);
-                    var stride = gpuAccessor.QueryTransformFeedbackStride(tfbIndex);
+                    ReadOnlySpan<byte> locations = gpuAccessor.QueryTransformFeedbackVaryingLocations(tfbIndex);
+                    int stride = gpuAccessor.QueryTransformFeedbackStride(tfbIndex);
 
                     for (int i = 0; i < locations.Length; i++)
                     {
@@ -181,16 +181,32 @@ namespace Ryujinx.Graphics.Shader.Translation
 
         private static void EmitOutputsInitialization(EmitterContext context, AttributeUsage attributeUsage, IGpuAccessor gpuAccessor, ShaderStage stage)
         {
-            // Compute has no output attributes, and fragment is the last stage, so we
-            // don't need to initialize outputs on those stages.
-            if (stage == ShaderStage.Compute || stage == ShaderStage.Fragment)
+            // Compute has no output attributes, so we
+            // don't need to initialize outputs on that stage.
+            if (stage == ShaderStage.Compute)
             {
+                return;
+            }
+
+            if (stage == ShaderStage.Fragment)
+            {
+                // Fragment is the last stage, so we don't need to
+                // initialize outputs unless we're using DSB, in which
+                // we need to make sure the ouput has a valid value.
+                if (gpuAccessor.QueryGraphicsState().DualSourceBlendEnable)
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        context.Store(StorageKind.Output, IoVariable.FragmentOutputColor, null, Const(1), Const(i), ConstF(0));
+                    }
+                }
+
                 return;
             }
 
             if (stage == ShaderStage.Vertex)
             {
-                InitializePositionOutput(context);
+                InitializeVertexOutputs(context);
             }
 
             UInt128 usedAttributes = context.TranslatorContext.AttributeUsage.NextInputAttributesComponents;
@@ -236,11 +252,19 @@ namespace Ryujinx.Graphics.Shader.Translation
             }
         }
 
-        private static void InitializePositionOutput(EmitterContext context)
+        private static void InitializeVertexOutputs(EmitterContext context)
         {
             for (int c = 0; c < 4; c++)
             {
                 context.Store(StorageKind.Output, IoVariable.Position, null, Const(c), ConstF(c == 3 ? 1f : 0f));
+            }
+
+            if (context.Program.ClipDistancesWritten != 0)
+            {
+                for (int i = 0; i < 8; i++)
+                {
+                    context.Store(StorageKind.Output, IoVariable.ClipDistance, null, Const(i), ConstF(0f));
+                }
             }
         }
 

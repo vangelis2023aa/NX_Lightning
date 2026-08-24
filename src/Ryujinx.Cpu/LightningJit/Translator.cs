@@ -1,10 +1,11 @@
 using ARMeilleure.Common;
 using ARMeilleure.Memory;
-using ARMeilleure.Signal;
+using Ryujinx.Memory;
 using Ryujinx.Cpu.Jit;
 using Ryujinx.Cpu.LightningJit.Cache;
 using Ryujinx.Cpu.LightningJit.CodeGen.Arm64;
 using Ryujinx.Cpu.LightningJit.State;
+using Ryujinx.Cpu.Signal;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -13,32 +14,33 @@ using System.Threading;
 
 namespace Ryujinx.Cpu.LightningJit
 {
+    public class DualMappedMemory {
+        private static bool initialized = false;
+
+        public static bool InitMemoryCache()
+        {
+            if (initialized)
+                return true;
+
+            try 
+            {
+                DualMappedNoWxCache.InitMemoryCache();
+                NativeSignalHandler.InitializeSignalHandler();
+
+                initialized = true;
+                return true;
+            } catch { return initialized; } 
+        }
+    }
+
     class Translator : IDisposable
     {
         // Should be enabled on platforms that enforce W^X.
         private static bool IsNoWxPlatform => OperatingSystem.IsIOS();
 
-        private static readonly AddressTable<ulong>.Level[] _levels64Bit =
-            new AddressTable<ulong>.Level[]
-            {
-                new(31, 17),
-                new(23,  8),
-                new(15,  8),
-                new( 7,  8),
-                new( 2,  5),
-            };
-
-        private static readonly AddressTable<ulong>.Level[] _levels32Bit =
-            new AddressTable<ulong>.Level[]
-            {
-                new(23, 9),
-                new(15, 8),
-                new( 7, 8),
-                new( 1, 6),
-            };
-
         private readonly ConcurrentQueue<KeyValuePair<ulong, TranslatedFunction>> _oldFuncs;
         private readonly NoWxCache _noWxCache;
+        private readonly DualMappedNoWxCache _dualMappedNoWxCache;
         private bool _disposed;
 
         internal TranslatorCache<TranslatedFunction> Functions { get; }
@@ -46,7 +48,7 @@ namespace Ryujinx.Cpu.LightningJit
         internal TranslatorStubs Stubs { get; }
         internal IMemoryManager Memory { get; }
 
-        public Translator(IJitMemoryAllocator allocator, IMemoryManager memory, bool for64Bits)
+        public Translator(IMemoryManager memory, AddressTable<ulong> functionTable)
         {
             Memory = memory;
 
@@ -54,30 +56,36 @@ namespace Ryujinx.Cpu.LightningJit
 
             if (IsNoWxPlatform)
             {
-                _noWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                if (MemoryBlock.DualMappedEnabled())
+                { 
+#pragma warning disable CA1416 // iOS checking is handled in MemoryBlock.DualMappedEnabled() 
+                    DualMappedNoWxCache.InitMemoryCache();
+                    _dualMappedNoWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+#pragma warning disable CA1416
+                }
+                else 
+                {
+                    _noWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                }
             }
             else
             {
-                JitCache.Initialize(allocator);
+                JitCache.Initialize(new JitMemoryAllocator(forJit: true));
             }
 
-            NativeSignalHandler.Initialize(allocator);
-
             Functions = new TranslatorCache<TranslatedFunction>();
-            FunctionTable = new AddressTable<ulong>(for64Bits ? _levels64Bit : _levels32Bit);
-            Stubs = new TranslatorStubs(FunctionTable, _noWxCache);
+            FunctionTable = functionTable;
+            Stubs = _dualMappedNoWxCache == null ? new TranslatorStubs(FunctionTable, _noWxCache) : new TranslatorStubs(FunctionTable, _dualMappedNoWxCache);
 
             FunctionTable.Fill = (ulong)Stubs.SlowDispatchStub;
 
-            if (memory.Type == MemoryManagerType.HostTracked ||
-                memory.Type == MemoryManagerType.HostMapped ||
-                memory.Type == MemoryManagerType.HostMappedUnsafe)
+            if (memory.Type.IsHostMappedOrTracked)
             {
-                NativeSignalHandler.InitializeSignalHandler(allocator.GetPageSize());
+                NativeSignalHandler.InitializeSignalHandler();
             }
         }
 
-        private static IStackWalker CreateStackWalker()
+        private static StackWalker CreateStackWalker()
         {
             if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
             {
@@ -99,15 +107,38 @@ namespace Ryujinx.Cpu.LightningJit
 
             NativeInterface.UnregisterThread();
             _noWxCache?.ClearEntireThreadLocalCache();
+#pragma warning disable CA1416
+            _dualMappedNoWxCache?.ClearEntireThreadLocalCache();
+#pragma warning restore CA1416
         }
 
-        internal IntPtr GetOrTranslatePointer(IntPtr framePointer, ulong address, ExecutionMode mode)
+        internal nint GetOrTranslatePointer(nint framePointer, ulong address, ExecutionMode mode)
         {
             if (_noWxCache != null)
             {
+                if (_noWxCache.TryGetCachedFunction(address, out nint funcPtr))
+                {
+                    return funcPtr;
+                }
+
                 CompiledFunction func = Compile(address, mode);
 
                 return _noWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+            } 
+            else if (_dualMappedNoWxCache != null) 
+            {
+#pragma warning disable CA1416
+                if (_dualMappedNoWxCache.TryGetCachedFunction(address, out nint funcPtr))
+                {
+                    return funcPtr;
+                }
+#pragma warning restore CA1416
+
+                CompiledFunction func = Compile(address, mode);
+
+#pragma warning disable CA1416
+                return _dualMappedNoWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+#pragma warning restore CA1416
             }
 
             return GetOrTranslate(address, mode).FuncPointer;
@@ -141,22 +172,22 @@ namespace Ryujinx.Cpu.LightningJit
             }
         }
 
-        internal TranslatedFunction Translate(ulong address, ExecutionMode mode)
+        private TranslatedFunction Translate(ulong address, ExecutionMode mode)
         {
             CompiledFunction func = Compile(address, mode);
-            IntPtr funcPointer = JitCache.Map(func.Code);
+            nint funcPointer = JitCache.Map(func.Code);
 
             return new TranslatedFunction(funcPointer, (ulong)func.GuestCodeLength);
         }
 
-        internal CompiledFunction Compile(ulong address, ExecutionMode mode)
+        private CompiledFunction Compile(ulong address, ExecutionMode mode)
         {
             return AarchCompiler.Compile(CpuPresets.CortexA57, Memory, address, FunctionTable, Stubs.DispatchStub, mode, RuntimeInformation.ProcessArchitecture);
         }
 
         public void InvalidateJitCacheRegion(ulong address, ulong size)
         {
-            ulong[] overlapAddresses = Array.Empty<ulong>();
+            ulong[] overlapAddresses = [];
 
             int overlapsCount = Functions.GetOverlaps(address, size, ref overlapAddresses);
 
@@ -185,14 +216,14 @@ namespace Ryujinx.Cpu.LightningJit
         {
             List<TranslatedFunction> functions = Functions.AsList();
 
-            foreach (var func in functions)
+            foreach (TranslatedFunction func in functions)
             {
                 JitCache.Unmap(func.FuncPointer);
             }
 
             Functions.Clear();
 
-            while (_oldFuncs.TryDequeue(out var kv))
+            while (_oldFuncs.TryDequeue(out KeyValuePair<ulong, TranslatedFunction> kv))
             {
                 JitCache.Unmap(kv.Value.FuncPointer);
             }
@@ -207,6 +238,12 @@ namespace Ryujinx.Cpu.LightningJit
                     if (_noWxCache != null)
                     {
                         _noWxCache.Dispose();
+                    }
+                    if (_dualMappedNoWxCache != null) 
+                    {
+#pragma warning disable CA1416
+                        _dualMappedNoWxCache.Dispose();
+#pragma warning disable CA1416
                     }
                     else
                     {

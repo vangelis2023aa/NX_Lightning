@@ -6,7 +6,7 @@ using Ryujinx.HLE.HOS.Services.Nim.ShopServiceAccessServerInterface;
 namespace Ryujinx.HLE.HOS.Services.Nim
 {
     [Service("nim:eca")] // 5.0.0+
-    class IShopServiceAccessServerInterface : IpcService
+    partial class IShopServiceAccessServerInterface : IpcService
     {
         public IShopServiceAccessServerInterface(ServiceCtx context) { }
 
@@ -39,6 +39,13 @@ namespace Ryujinx.HLE.HOS.Services.Nim
             context.ResponseData.Write(baseStorageId == StorageId.Host);
 
             return ResultCode.Success;
+        }
+
+        [CommandCmif(5)] // 17.0.0+
+        // CreateServerInterface2(pid, handle<unknown>, u64) -> object<nn::ec::IshopServiceAccessServer>
+        public ResultCode CreateServerInterface2(ServiceCtx context)
+        {
+            return CreateServerInterface(context);
         }
     }
 }

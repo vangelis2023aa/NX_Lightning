@@ -5,6 +5,7 @@ using Ryujinx.Common.Configuration.Hid.Controller.Motion;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.Services.Hid;
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -27,7 +28,8 @@ namespace Ryujinx.Input.HLE
             }
         }
 
-        private static readonly HLEButtonMappingEntry[] _hleButtonMapping = {
+        private static readonly HLEButtonMappingEntry[] _hleButtonMapping =
+        [
             new(GamepadButtonInputId.A, ControllerKeys.A),
             new(GamepadButtonInputId.B, ControllerKeys.B),
             new(GamepadButtonInputId.X, ControllerKeys.X),
@@ -48,8 +50,8 @@ namespace Ryujinx.Input.HLE
             new(GamepadButtonInputId.SingleLeftTrigger0, ControllerKeys.SlLeft),
             new(GamepadButtonInputId.SingleRightTrigger0, ControllerKeys.SrLeft),
             new(GamepadButtonInputId.SingleLeftTrigger1, ControllerKeys.SlRight),
-            new(GamepadButtonInputId.SingleRightTrigger1, ControllerKeys.SrRight),
-        };
+            new(GamepadButtonInputId.SingleRightTrigger1, ControllerKeys.SrRight)
+        ];
 
         private class HLEKeyboardMappingEntry
         {
@@ -63,7 +65,8 @@ namespace Ryujinx.Input.HLE
             }
         }
 
-        private static readonly HLEKeyboardMappingEntry[] _keyMapping = {
+        private static readonly HLEKeyboardMappingEntry[] _keyMapping =
+        [
             new(Key.A, 0x4),
             new(Key.B, 0x5),
             new(Key.C, 0x6),
@@ -186,10 +189,11 @@ namespace Ryujinx.Input.HLE
             new(Key.ControlRight, 0xE4),
             new(Key.ShiftRight,   0xE5),
             new(Key.AltRight,     0xE6),
-            new(Key.WinRight,     0xE7),
-        };
+            new(Key.WinRight,     0xE7)
+        ];
 
-        private static readonly HLEKeyboardMappingEntry[] _keyModifierMapping = {
+        private static readonly HLEKeyboardMappingEntry[] _keyModifierMapping =
+        [
             new(Key.ControlLeft,  0),
             new(Key.ShiftLeft,    1),
             new(Key.AltLeft,      2),
@@ -200,10 +204,8 @@ namespace Ryujinx.Input.HLE
             new(Key.WinRight,     7),
             new(Key.CapsLock,     8),
             new(Key.ScrollLock,   9),
-            new(Key.NumLock,      10),
-        };
-
-        private bool _isValid;
+            new(Key.NumLock,      10)
+        ];
 
         private MotionInput _leftMotionInput;
         private MotionInput _rightMotionInput;
@@ -222,7 +224,6 @@ namespace Ryujinx.Input.HLE
         {
             State = default;
             Id = null;
-            _isValid = false;
             _cemuHookClient = cemuHookClient;
         }
 
@@ -234,20 +235,19 @@ namespace Ryujinx.Input.HLE
 
             Id = config.Id;
             _gamepad = GamepadDriver.GetGamepad(Id);
-            _isValid = _gamepad != null;
 
             UpdateUserConfiguration(config);
 
-            return _isValid;
+            return _gamepad != null;
         }
 
         public void UpdateUserConfiguration(InputConfig config)
         {
             if (config is StandardControllerInputConfig controllerConfig)
             {
-                bool needsMotionInputUpdate = _config == null || (_config is StandardControllerInputConfig oldControllerConfig &&
-                                                                (oldControllerConfig.Motion.EnableMotion != controllerConfig.Motion.EnableMotion) &&
-                                                                (oldControllerConfig.Motion.MotionBackend != controllerConfig.Motion.MotionBackend));
+                bool needsMotionInputUpdate = _config is not StandardControllerInputConfig oldControllerConfig ||
+                    ((oldControllerConfig.Motion.EnableMotion != controllerConfig.Motion.EnableMotion) ||
+                    (oldControllerConfig.Motion.MotionBackend != controllerConfig.Motion.MotionBackend));
 
                 if (needsMotionInputUpdate)
                 {
@@ -262,38 +262,45 @@ namespace Ryujinx.Input.HLE
 
             _config = config;
 
-            if (_isValid)
-            {
-                _gamepad.SetConfiguration(config);
-            }
+            _gamepad?.SetConfiguration(config);
         }
 
         private void UpdateMotionInput(MotionConfigController motionConfig)
         {
-            if (motionConfig.MotionBackend != MotionInputBackendType.CemuHook)
+            if (!motionConfig.EnableMotion)
+            {
+                _leftMotionInput = null;
+                _rightMotionInput = null;
+            }
+            else if (motionConfig.MotionBackend != MotionInputBackendType.CemuHook)
             {
                 _leftMotionInput = new MotionInput();
+                _rightMotionInput = new MotionInput();
             }
             else
             {
                 _leftMotionInput = null;
+                _rightMotionInput = null;
             }
         }
 
         public void Update()
         {
-            if (_isValid && GamepadDriver != null)
+            // _gamepad may be altered by other threads
+            IGamepad gamepad = _gamepad;
+
+            if (gamepad != null && GamepadDriver != null)
             {
-                State = _gamepad.GetMappedStateSnapshot();
+                State = gamepad.GetMappedStateSnapshot();
 
                 if (_config is StandardControllerInputConfig controllerConfig && controllerConfig.Motion.EnableMotion)
                 {
                     if (controllerConfig.Motion.MotionBackend == MotionInputBackendType.GamepadDriver)
                     {
-                        if (_gamepad.Features.HasFlag(GamepadFeaturesFlag.Motion))
+                        if ((gamepad.Features & GamepadFeaturesFlag.Motion) != 0)
                         {
-                            Vector3 accelerometer = _gamepad.GetMotionData(MotionInputId.Accelerometer);
-                            Vector3 gyroscope = _gamepad.GetMotionData(MotionInputId.Gyroscope);
+                            Vector3 accelerometer = gamepad.GetMotionData(MotionInputId.Accelerometer);
+                            Vector3 gyroscope = gamepad.GetMotionData(MotionInputId.Gyroscope);
 
                             accelerometer = new Vector3(accelerometer.X, -accelerometer.Z, accelerometer.Y);
                             gyroscope = new Vector3(gyroscope.X, -gyroscope.Z, gyroscope.Y);
@@ -302,7 +309,20 @@ namespace Ryujinx.Input.HLE
 
                             if (controllerConfig.ControllerType == ConfigControllerType.JoyconPair)
                             {
-                                _rightMotionInput = _leftMotionInput;
+                                if (gamepad.Id == "JoyConPair")
+                                {
+                                    Vector3 rightAccelerometer = gamepad.GetMotionData(MotionInputId.SecondAccelerometer);
+                                    Vector3 rightGyroscope = gamepad.GetMotionData(MotionInputId.SecondGyroscope);
+
+                                    rightAccelerometer = new Vector3(rightAccelerometer.X, -rightAccelerometer.Z, rightAccelerometer.Y);
+                                    rightGyroscope = new Vector3(rightGyroscope.X, -rightGyroscope.Z, rightGyroscope.Y);
+
+                                    _rightMotionInput.Update(rightAccelerometer, rightGyroscope, (ulong)PerformanceCounter.ElapsedNanoseconds / 1000, controllerConfig.Motion.Sensitivity, (float)controllerConfig.Motion.GyroDeadzone);
+                                }
+                                else
+                                {
+                                    _rightMotionInput = _leftMotionInput;
+                                }
                             }
                         }
                     }
@@ -337,6 +357,7 @@ namespace Ryujinx.Input.HLE
                 // Reset states
                 State = default;
                 _leftMotionInput = null;
+                _rightMotionInput = null;
             }
         }
 
@@ -491,38 +512,35 @@ namespace Ryujinx.Input.HLE
             return value;
         }
 
-        public KeyboardInput? GetHLEKeyboardInput()
+        public static KeyboardInput GetHLEKeyboardInput(IGamepadDriver KeyboardDriver)
         {
-            if (_gamepad is IKeyboard keyboard)
+            IKeyboard keyboard = KeyboardDriver.GetGamepad("0") as IKeyboard;
+
+            KeyboardStateSnapshot keyboardState = keyboard.GetKeyboardStateSnapshot();
+
+            KeyboardInput hidKeyboard = new()
             {
-                KeyboardStateSnapshot keyboardState = keyboard.GetKeyboardStateSnapshot();
+                Modifier = 0,
+                Keys = new ulong[0x4],
+            };
 
-                KeyboardInput hidKeyboard = new()
-                {
-                    Modifier = 0,
-                    Keys = new ulong[0x4],
-                };
+            foreach (HLEKeyboardMappingEntry entry in _keyMapping)
+            {
+                ulong value = keyboardState.IsPressed(entry.TargetKey) ? 1UL : 0UL;
 
-                foreach (HLEKeyboardMappingEntry entry in _keyMapping)
-                {
-                    ulong value = keyboardState.IsPressed(entry.TargetKey) ? 1UL : 0UL;
-
-                    hidKeyboard.Keys[entry.Target / 0x40] |= (value << (entry.Target % 0x40));
-                }
-
-                foreach (HLEKeyboardMappingEntry entry in _keyModifierMapping)
-                {
-                    int value = keyboardState.IsPressed(entry.TargetKey) ? 1 : 0;
-
-                    hidKeyboard.Modifier |= value << entry.Target;
-                }
-
-                return hidKeyboard;
+                hidKeyboard.Keys[entry.Target / 0x40] |= (value << (entry.Target % 0x40));
             }
 
-            return null;
-        }
+            foreach (HLEKeyboardMappingEntry entry in _keyModifierMapping)
+            {
+                int value = keyboardState.IsPressed(entry.TargetKey) ? 1 : 0;
 
+                hidKeyboard.Modifier |= value << entry.Target;
+            }
+
+            return hidKeyboard;
+
+        }
 
         protected virtual void Dispose(bool disposing)
         {
@@ -547,19 +565,50 @@ namespace Ryujinx.Input.HLE
                     VibrationValue leftVibrationValue = dualVibrationValue.Item1;
                     VibrationValue rightVibrationValue = dualVibrationValue.Item2;
 
-                    float low = Math.Min(1f, (float)((rightVibrationValue.AmplitudeLow * 0.85 + rightVibrationValue.AmplitudeHigh * 0.15) * controllerConfig.Rumble.StrongRumble));
-                    float high = Math.Min(1f, (float)((leftVibrationValue.AmplitudeLow * 0.15 + leftVibrationValue.AmplitudeHigh * 0.85) * controllerConfig.Rumble.WeakRumble));
-
-                    _gamepad.Rumble(low, high, uint.MaxValue);
+                    if (_gamepad is IHighDefinitionRumbleGamepad hdRumbleGamepad)
+                    {
+                        hdRumbleGamepad.Rumble(
+                            ToGamepadVibrationValue(leftVibrationValue, controllerConfig),
+                            ToGamepadVibrationValue(rightVibrationValue, controllerConfig),
+                            uint.MaxValue);
+                    }
+                    else
+                    {
+                        (float low, float high) = GetFallbackRumble(leftVibrationValue, rightVibrationValue, controllerConfig);
+                        _gamepad.Rumble(low, high, uint.MaxValue);
+                    }
 
                     Logger.Debug?.Print(LogClass.Hid, $"Effect for {controllerConfig.PlayerIndex} " +
                         $"L.low.amp={leftVibrationValue.AmplitudeLow}, " +
+                        $"L.low.freq={leftVibrationValue.FrequencyLow}, " +
                         $"L.high.amp={leftVibrationValue.AmplitudeHigh}, " +
+                        $"L.high.freq={leftVibrationValue.FrequencyHigh}, " +
                         $"R.low.amp={rightVibrationValue.AmplitudeLow}, " +
+                        $"R.low.freq={rightVibrationValue.FrequencyLow}, " +
                         $"R.high.amp={rightVibrationValue.AmplitudeHigh} " +
-                        $"--> ({low}, {high})");
+                        $"R.high.freq={rightVibrationValue.FrequencyHigh}");
                 }
             }
+        }
+
+        private static GamepadVibrationValue ToGamepadVibrationValue(VibrationValue vibrationValue, StandardControllerInputConfig controllerConfig)
+        {
+            return new GamepadVibrationValue(
+                Math.Clamp((float)(vibrationValue.AmplitudeLow * controllerConfig.Rumble.StrongRumble), 0f, 1f),
+                vibrationValue.FrequencyLow,
+                Math.Clamp((float)(vibrationValue.AmplitudeHigh * controllerConfig.Rumble.WeakRumble), 0f, 1f),
+                vibrationValue.FrequencyHigh);
+        }
+
+        private static (float Low, float High) GetFallbackRumble(
+            VibrationValue leftVibrationValue,
+            VibrationValue rightVibrationValue,
+            StandardControllerInputConfig controllerConfig)
+        {
+            float low = Math.Min(1f, (float)((rightVibrationValue.AmplitudeLow * 0.85 + rightVibrationValue.AmplitudeHigh * 0.15) * controllerConfig.Rumble.StrongRumble));
+            float high = Math.Min(1f, (float)((leftVibrationValue.AmplitudeLow * 0.15 + leftVibrationValue.AmplitudeHigh * 0.85) * controllerConfig.Rumble.WeakRumble));
+
+            return (low, high);
         }
     }
 }

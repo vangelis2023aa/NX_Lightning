@@ -59,7 +59,7 @@ namespace ARMeilleure.Instructions
             {
                 Operand value = GetInt(context, rt);
 
-                if (ext == Extension.Sx32 || ext == Extension.Sx64)
+                if (ext is Extension.Sx32 or Extension.Sx64)
                 {
                     OperandType destType = ext == Extension.Sx64 ? OperandType.I64 : OperandType.I32;
 
@@ -123,9 +123,9 @@ namespace ARMeilleure.Instructions
 
         private static bool IsSimd(ArmEmitterContext context)
         {
-            return context.CurrOp is IOpCodeSimd &&
-                 !(context.CurrOp is OpCodeSimdMemMs ||
-                   context.CurrOp is OpCodeSimdMemSs);
+            return context.CurrOp is IOpCodeSimd and
+                 not (OpCodeSimdMemMs or
+                   OpCodeSimdMemSs);
         }
 
         public static Operand EmitReadInt(ArmEmitterContext context, Operand address, int size)
@@ -157,7 +157,7 @@ namespace ARMeilleure.Instructions
 
             context.Copy(temp, value);
 
-            if (!context.Memory.Type.IsHostMappedOrTracked())
+            if (!context.Memory.Type.IsHostMappedOrTracked)
             {
                 context.Branch(lblEnd);
 
@@ -198,7 +198,7 @@ namespace ARMeilleure.Instructions
 
             SetInt(context, rt, value);
 
-            if (!context.Memory.Type.IsHostMappedOrTracked())
+            if (!context.Memory.Type.IsHostMappedOrTracked)
             {
                 context.Branch(lblEnd);
 
@@ -265,7 +265,7 @@ namespace ARMeilleure.Instructions
 
             context.Copy(GetVec(rt), value);
 
-            if (!context.Memory.Type.IsHostMappedOrTracked())
+            if (!context.Memory.Type.IsHostMappedOrTracked)
             {
                 context.Branch(lblEnd);
 
@@ -312,7 +312,7 @@ namespace ARMeilleure.Instructions
                     break;
             }
 
-            if (!context.Memory.Type.IsHostMappedOrTracked())
+            if (!context.Memory.Type.IsHostMappedOrTracked)
             {
                 context.Branch(lblEnd);
 
@@ -385,7 +385,7 @@ namespace ARMeilleure.Instructions
                     break;
             }
 
-            if (!context.Memory.Type.IsHostMappedOrTracked())
+            if (!context.Memory.Type.IsHostMappedOrTracked)
             {
                 context.Branch(lblEnd);
 
@@ -399,22 +399,28 @@ namespace ARMeilleure.Instructions
 
         public static Operand EmitPtPointerLoad(ArmEmitterContext context, Operand address, Operand lblSlowPath, bool write, int size)
         {
-            if (context.Memory.Type.IsHostMapped())
+            if (context.Memory.Type.IsHostMapped)
             {
                 return EmitHostMappedPointer(context, address);
             }
-            else if (context.Memory.Type == MemoryManagerType.HostTracked)
+            else if (context.Memory.Type.IsHostTracked)
             {
+                if (address.Type == OperandType.I32)
+                {
+                    address = context.ZeroExtend32(OperandType.I64, address);
+                }
+
+                if (context.Memory.Type == MemoryManagerType.HostTracked)
+                {
+                    Operand mask = Const(ulong.MaxValue >> (64 - context.Memory.AddressSpaceBits));
+                    address = context.BitwiseAnd(address, mask);
+                }
+
                 Operand ptBase = !context.HasPtc
                     ? Const(context.Memory.PageTablePointer.ToInt64())
                     : Const(context.Memory.PageTablePointer.ToInt64(), Ptc.PageTableSymbol);
 
                 Operand ptOffset = context.ShiftRightUI(address, Const(PageBits));
-
-                if (ptOffset.Type == OperandType.I32)
-                {
-                    ptOffset = context.ZeroExtend32(OperandType.I64, ptOffset);
-                }
 
                 return context.Add(address, context.Load(OperandType.I64, context.Add(ptBase, context.ShiftLeft(ptOffset, Const(3)))));
             }
@@ -711,7 +717,7 @@ namespace ARMeilleure.Instructions
             };
         }
 
-        private static Exception InvalidOpCodeType(OpCode opCode)
+        private static InvalidOperationException InvalidOpCodeType(OpCode opCode)
         {
             return new InvalidOperationException($"Invalid OpCode type \"{opCode?.GetType().Name ?? "null"}\".");
         }
@@ -762,6 +768,7 @@ namespace ARMeilleure.Instructions
                         {
                             m = InstEmitAluHelper.GetRrxC(context, m, setCarry);
                         }
+
                         break;
                 }
             }

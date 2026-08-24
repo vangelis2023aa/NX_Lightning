@@ -15,23 +15,24 @@ namespace Ryujinx.Tests.Cpu
         #region "ValueSource (Opcodes)"
         private static uint[] _Vrint_AMNP_V_F32_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf3ba0500u, // VRINTA.F32 Q0, Q0
                 0xf3ba0680u, // VRINTM.F32 Q0, Q0
                 0xf3ba0400u, // VRINTN.F32 Q0, Q0
-                0xf3ba0780u, // VRINTP.F32 Q0, Q0
-            };
+                0xf3ba0780u // VRINTP.F32 Q0, Q0
+            ];
         }
         #endregion
 
         #region "ValueSource (Types)"
         private static uint[] _1S_()
         {
-            return new[] {
+            return
+            [
                 0x00000000u, 0x7FFFFFFFu,
-                0x80000000u, 0xFFFFFFFFu,
-            };
+                0x80000000u, 0xFFFFFFFFu
+            ];
         }
 
         private static IEnumerable<ulong> _1S_F_()
@@ -465,7 +466,7 @@ namespace Ryujinx.Tests.Cpu
 
             opcode |= (fixImm & 0x3f) << 16;
 
-            var v0 = new V128((uint)s0, (uint)s1, (uint)s2, (uint)s3);
+            V128 v0 = new((uint)s0, (uint)s1, (uint)s2, (uint)s3);
 
             SingleOpcode(opcode, v0: v0);
 
@@ -505,9 +506,48 @@ namespace Ryujinx.Tests.Cpu
 
             opcode |= (fixImm & 0x3f) << 16;
 
-            var v0 = new V128(s0, s1, s2, s3);
+            V128 v0 = new(s0, s1, s2, s3);
 
             SingleOpcode(opcode, v0: v0);
+
+            CompareAgainstUnicorn();
+        }
+
+        [Test, Pairwise, Description("VRINTR.F<size> <Sd>, <Sm>")]
+        [Platform(Exclude = "Linux,MacOsX")] // Instruction isn't testable due to Unicorn.
+        public void Vrintr([Values(0u, 1u)] uint rd,
+                           [Values(0u, 1u)] uint rm,
+                           [Values(2u, 3u)] uint size,
+                           [ValueSource(nameof(_1D_F_))] ulong s0,
+                           [ValueSource(nameof(_1D_F_))] ulong s1,
+                           [ValueSource(nameof(_1D_F_))] ulong s2,
+                           [Values(RMode.Rn, RMode.Rm, RMode.Rp)] RMode rMode)
+        {
+            uint opcode = 0xEEB60A40;
+
+            V128 v0, v1, v2;
+
+            if (size == 2)
+            {
+                opcode |= ((rm & 0x1e) >> 1) | ((rm & 0x1) << 5);
+                opcode |= ((rd & 0x1e) << 11) | ((rd & 0x1) << 22);
+                v0 = MakeVectorE0E1((uint)BitConverter.SingleToInt32Bits(s0), (uint)BitConverter.SingleToInt32Bits(s0));
+                v1 = MakeVectorE0E1((uint)BitConverter.SingleToInt32Bits(s1), (uint)BitConverter.SingleToInt32Bits(s0));
+                v2 = MakeVectorE0E1((uint)BitConverter.SingleToInt32Bits(s2), (uint)BitConverter.SingleToInt32Bits(s1));
+            }
+            else
+            {
+                opcode |= ((rm & 0xf) << 0) | ((rm & 0x10) << 1);
+                opcode |= ((rd & 0xf) << 12) | ((rd & 0x10) << 18);
+                v0 = MakeVectorE0E1((uint)BitConverter.DoubleToInt64Bits(s0), (uint)BitConverter.DoubleToInt64Bits(s0));
+                v1 = MakeVectorE0E1((uint)BitConverter.DoubleToInt64Bits(s1), (uint)BitConverter.DoubleToInt64Bits(s0));
+                v2 = MakeVectorE0E1((uint)BitConverter.DoubleToInt64Bits(s2), (uint)BitConverter.DoubleToInt64Bits(s1));
+            }
+
+            opcode |= ((size & 3) << 8);
+
+            int fpscr = (int)rMode << (int)Fpcr.RMode;
+            SingleOpcode(opcode, v0: v0, v1: v1, v2: v2, fpscr: fpscr);
 
             CompareAgainstUnicorn();
         }

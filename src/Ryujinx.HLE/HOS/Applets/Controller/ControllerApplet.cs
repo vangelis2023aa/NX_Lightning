@@ -1,3 +1,4 @@
+using Microsoft.IO;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.Memory;
 using Ryujinx.HLE.HOS.Services.Am.AppletAE;
@@ -86,7 +87,7 @@ namespace Ryujinx.HLE.HOS.Applets
             PlayerIndex primaryIndex;
             while (!_system.Device.Hid.Npads.Validate(playerMin, playerMax, (ControllerType)privateArg.NpadStyleSet, out configuredCount, out primaryIndex))
             {
-                ControllerAppletUiArgs uiArgs = new()
+                ControllerAppletUIArgs uiArgs = new()
                 {
                     PlayerCountMin = playerMin,
                     PlayerCountMax = playerMax,
@@ -95,7 +96,7 @@ namespace Ryujinx.HLE.HOS.Applets
                     IsDocked = _system.State.DockedMode,
                 };
 
-                if (!_system.Device.UiHandler.DisplayMessageDialog(uiArgs))
+                if (!_system.Device.UIHandler.DisplayMessageDialog(uiArgs))
                 {
                     break;
                 }
@@ -117,14 +118,9 @@ namespace Ryujinx.HLE.HOS.Applets
             return ResultCode.Success;
         }
 
-        public ResultCode GetResult()
-        {
-            return ResultCode.Success;
-        }
-
         private static byte[] BuildResponse(ControllerSupportResultInfo result)
         {
-            using MemoryStream stream = MemoryStreamManager.Shared.GetStream();
+            using RecyclableMemoryStream stream = MemoryStreamManager.Shared.GetStream();
             using BinaryWriter writer = new(stream);
 
             writer.Write(MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref result, Unsafe.SizeOf<ControllerSupportResultInfo>())));
@@ -134,7 +130,7 @@ namespace Ryujinx.HLE.HOS.Applets
 
         private static byte[] BuildResponse()
         {
-            using MemoryStream stream = MemoryStreamManager.Shared.GetStream();
+            using RecyclableMemoryStream stream = MemoryStreamManager.Shared.GetStream();
             using BinaryWriter writer = new(stream);
 
             writer.Write((ulong)ResultCode.Success);

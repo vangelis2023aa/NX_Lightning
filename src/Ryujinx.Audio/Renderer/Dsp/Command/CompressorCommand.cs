@@ -1,9 +1,11 @@
 using Ryujinx.Audio.Renderer.Dsp.Effect;
 using Ryujinx.Audio.Renderer.Dsp.State;
+using Ryujinx.Audio.Renderer.Parameter;
 using Ryujinx.Audio.Renderer.Parameter.Effect;
 using Ryujinx.Audio.Renderer.Server.Effect;
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Ryujinx.Audio.Renderer.Dsp.Command
 {
@@ -13,37 +15,47 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
         public CommandType CommandType => CommandType.Compressor;
 
         public uint EstimatedProcessingTime { get; set; }
 
         public CompressorParameter Parameter => _parameter;
-        public Memory<CompressorState> State { get; }
+        public Memory<CompressorState> State { get; private set; }
+        public Memory<EffectResultState> ResultState { get; private set; }
         public ushort[] OutputBufferIndices { get; }
         public ushort[] InputBufferIndices { get; }
-        public bool IsEffectEnabled { get; }
+        public bool IsEffectEnabled { get; private set; }
 
         private CompressorParameter _parameter;
 
-        public CompressorCommand(uint bufferOffset, CompressorParameter parameter, Memory<CompressorState> state, bool isEnabled, int nodeId)
+        public CompressorCommand()
+        {
+            InputBufferIndices = new ushort[Constants.VoiceChannelCountMax];
+            OutputBufferIndices = new ushort[Constants.VoiceChannelCountMax];
+        }
+
+        public CompressorCommand Initialize(uint bufferOffset, CompressorParameter parameter, Memory<CompressorState> state, Memory<EffectResultState> resultState, bool isEnabled, int nodeId)
         {
             Enabled = true;
             NodeId = nodeId;
             _parameter = parameter;
             State = state;
+            ResultState = resultState;
 
             IsEffectEnabled = isEnabled;
-
-            InputBufferIndices = new ushort[Constants.VoiceChannelCountMax];
-            OutputBufferIndices = new ushort[Constants.VoiceChannelCountMax];
+            
+            Span<byte> inputSpan = _parameter.Input.AsSpan();
+            Span<byte> outputSpan = _parameter.Output.AsSpan();
 
             for (int i = 0; i < _parameter.ChannelCount; i++)
             {
-                InputBufferIndices[i] = (ushort)(bufferOffset + _parameter.Input[i]);
-                OutputBufferIndices[i] = (ushort)(bufferOffset + _parameter.Output[i]);
+                InputBufferIndices[i] = (ushort)(bufferOffset + inputSpan[i]);
+                OutputBufferIndices[i] = (ushort)(bufferOffset + outputSpan[i]);
             }
+
+            return this;
         }
 
         public void Process(CommandList context)
@@ -71,9 +83,16 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
             if (IsEffectEnabled && _parameter.IsChannelCountValid())
             {
-                Span<IntPtr> inputBuffers = stackalloc IntPtr[Parameter.ChannelCount];
-                Span<IntPtr> outputBuffers = stackalloc IntPtr[Parameter.ChannelCount];
-                Span<float> channelInput = stackalloc float[Parameter.ChannelCount];
+                if (!ResultState.IsEmpty && _parameter.StatisticsReset)
+                {
+                    ref CompressorStatistics statistics = ref MemoryMarshal.Cast<byte, CompressorStatistics>(ResultState.Span[0].SpecificData)[0];
+
+                    statistics.Reset(_parameter.ChannelCount);
+                }
+
+                Span<nint> inputBuffers = stackalloc nint[_parameter.ChannelCount];
+                Span<nint> outputBuffers = stackalloc nint[_parameter.ChannelCount];
+                Span<float> channelInput = stackalloc float[_parameter.ChannelCount];
                 ExponentialMovingAverage inputMovingAverage = state.InputMovingAverage;
                 float unknown4 = state.Unknown4;
                 ExponentialMovingAverage compressionGainAverage = state.CompressionGainAverage;
@@ -92,7 +111,8 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                         channelInput[channelIndex] = *((float*)inputBuffers[channelIndex] + sampleIndex);
                     }
 
-                    float newMean = inputMovingAverage.Update(FloatingPointHelper.MeanSquare(channelInput), _parameter.InputGain);
+                    float mean = FloatingPointHelper.MeanSquare(channelInput);
+                    float newMean = inputMovingAverage.Update(mean, _parameter.InputGain);
                     float y = FloatingPointHelper.Log10(newMean) * 10.0f;
                     float z = 1.0f;
 
@@ -111,7 +131,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
                         if (y >= state.Unknown14)
                         {
-                            tmpGain = ((1.0f / Parameter.Ratio) - 1.0f) * (y - Parameter.Threshold);
+                            tmpGain = ((1.0f / _parameter.Ratio) - 1.0f) * (y - _parameter.Threshold);
                         }
                         else
                         {
@@ -126,7 +146,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
                     if ((unknown4 - z) <= 0.08f)
                     {
-                        compressionEmaAlpha = Parameter.ReleaseCoefficient;
+                        compressionEmaAlpha = _parameter.ReleaseCoefficient;
 
                         if ((unknown4 - z) >= -0.08f)
                         {
@@ -140,18 +160,33 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                     }
                     else
                     {
-                        compressionEmaAlpha = Parameter.AttackCoefficient;
+                        compressionEmaAlpha = _parameter.AttackCoefficient;
                     }
 
                     float compressionGain = compressionGainAverage.Update(z, compressionEmaAlpha);
 
-                    for (int channelIndex = 0; channelIndex < Parameter.ChannelCount; channelIndex++)
+                    for (int channelIndex = 0; channelIndex < _parameter.ChannelCount; channelIndex++)
                     {
                         *((float*)outputBuffers[channelIndex] + sampleIndex) = channelInput[channelIndex] * compressionGain * state.OutputGain;
                     }
 
                     unknown4 = unknown4New;
                     previousCompressionEmaAlpha = compressionEmaAlpha;
+
+                    if (!ResultState.IsEmpty)
+                    {
+                        ref CompressorStatistics statistics = ref MemoryMarshal.Cast<byte, CompressorStatistics>(ResultState.Span[0].SpecificData)[0];
+
+                        statistics.MinimumGain = MathF.Min(statistics.MinimumGain, compressionGain * state.OutputGain);
+                        statistics.MaximumMean = MathF.Max(statistics.MaximumMean, mean);
+                        
+                        Span<float> lastSamplesSpan = statistics.LastSamples.AsSpan();
+
+                        for (int channelIndex = 0; channelIndex < _parameter.ChannelCount; channelIndex++)
+                        {
+                            lastSamplesSpan[channelIndex] = MathF.Abs(channelInput[channelIndex] * (1f / 32768f));
+                        }
+                    }
                 }
 
                 state.InputMovingAverage = inputMovingAverage;
@@ -161,7 +196,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
             }
             else
             {
-                for (int i = 0; i < Parameter.ChannelCount; i++)
+                for (int i = 0; i < _parameter.ChannelCount; i++)
                 {
                     if (InputBufferIndices[i] != OutputBufferIndices[i])
                     {

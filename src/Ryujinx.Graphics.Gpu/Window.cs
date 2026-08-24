@@ -1,9 +1,11 @@
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Image;
+using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Texture;
 using Ryujinx.Memory.Range;
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading;
 
 namespace Ryujinx.Graphics.Gpu
@@ -14,6 +16,7 @@ namespace Ryujinx.Graphics.Gpu
     public class Window
     {
         private readonly GpuContext _context;
+        private const int DefaultUnboundedPresentTargetFps = 60;
 
         /// <summary>
         /// Texture presented on the window.
@@ -85,8 +88,12 @@ namespace Ryujinx.Graphics.Gpu
         }
 
         private readonly ConcurrentQueue<PresentationTexture> _frameQueue;
+        private readonly Stopwatch _unboundedPresentTimer;
+        private long _unboundedPresentTicksPerFrame;
 
         private int _framesAvailable;
+        private long _lastUnboundedPresentTicks;
+        private volatile bool _unboundedPresentMode;
 
         public bool IsFrameAvailable => _framesAvailable != 0;
 
@@ -99,6 +106,8 @@ namespace Ryujinx.Graphics.Gpu
             _context = context;
 
             _frameQueue = new ConcurrentQueue<PresentationTexture>();
+            _unboundedPresentTimer = Stopwatch.StartNew();
+            SetUnboundedPresentTargetFps(DefaultUnboundedPresentTargetFps);
         }
 
         /// <summary>
@@ -131,13 +140,13 @@ namespace Ryujinx.Graphics.Gpu
             bool isLinear,
             int gobBlocksInY,
             Format format,
-            int bytesPerPixel,
+            byte bytesPerPixel,
             ImageCrop crop,
             Action<GpuContext, object> acquireCallback,
             Action<object> releaseCallback,
             object userObj)
         {
-            if (!_context.PhysicalMemoryRegistry.TryGetValue(pid, out var physicalMemory))
+            if (!_context.PhysicalMemoryRegistry.TryGetValue(pid, out PhysicalMemory physicalMemory))
             {
                 return false;
             }
@@ -239,6 +248,85 @@ namespace Ryujinx.Graphics.Gpu
 
                 _context.Renderer.Window.Present(texture.HostTexture, crop, swapBuffersCallback);
 
+                pt.ReleaseCallback(pt.UserObj);
+            }
+        }
+
+        /// <summary>
+        /// Presents all available ready frames, optionally capping unbounded present mode.
+        /// </summary>
+        /// <remarks>
+        /// This method always consumes frames through <see cref="ConsumeFrameAvailable"/> before dequeuing,
+        /// preserving the guest GPU fence readiness gate.
+        /// </remarks>
+        /// <param name="swapBuffersCallback">Callback method to call when a new texture should be presented on the screen</param>
+        /// <returns>True if a frame was presented, false otherwise</returns>
+        public bool PresentLoop(Action swapBuffersCallback)
+        {
+            bool presented = false;
+
+            if (!_unboundedPresentMode)
+            {
+                while (ConsumeFrameAvailable())
+                {
+                    Present(swapBuffersCallback);
+                    presented = true;
+                }
+
+                return presented;
+            }
+
+            long ticks = _unboundedPresentTimer.ElapsedTicks;
+            long lastPresentTicks = Interlocked.Read(ref _lastUnboundedPresentTicks);
+            bool shouldPresent = lastPresentTicks == 0 || ticks - lastPresentTicks >= Interlocked.Read(ref _unboundedPresentTicksPerFrame);
+
+            while (ConsumeFrameAvailable())
+            {
+                if (shouldPresent)
+                {
+                    Present(swapBuffersCallback);
+                    _lastUnboundedPresentTicks = ticks;
+                    shouldPresent = false;
+                    presented = true;
+                }
+                else
+                {
+                    DropFrame();
+                }
+            }
+
+            return presented;
+        }
+
+        /// <summary>
+        /// Sets whether the host present loop should cap and drop surplus ready frames.
+        /// </summary>
+        /// <param name="enabled">True when the guest compositor is running with swap interval 0</param>
+        public void SetUnboundedPresentMode(bool enabled)
+        {
+            if (_unboundedPresentMode != enabled)
+            {
+                _unboundedPresentMode = enabled;
+                Interlocked.Exchange(ref _lastUnboundedPresentTicks, 0);
+            }
+        }
+
+        /// <summary>
+        /// Sets the FPS target used when unbounded present mode is capped by the host.
+        /// </summary>
+        /// <param name="targetFps">Host display refresh rate in frames per second</param>
+        public void SetUnboundedPresentTargetFps(int targetFps)
+        {
+            targetFps = Math.Max(1, targetFps);
+
+            Interlocked.Exchange(ref _unboundedPresentTicksPerFrame, Math.Max(1, Stopwatch.Frequency / targetFps));
+            Interlocked.Exchange(ref _lastUnboundedPresentTicks, 0);
+        }
+
+        private void DropFrame()
+        {
+            if (_frameQueue.TryDequeue(out PresentationTexture pt))
+            {
                 pt.ReleaseCallback(pt.UserObj);
             }
         }

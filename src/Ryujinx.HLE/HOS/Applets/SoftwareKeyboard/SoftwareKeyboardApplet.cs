@@ -4,8 +4,8 @@ using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.Applets.SoftwareKeyboard;
 using Ryujinx.HLE.HOS.Services.Am.AppletAE;
 using Ryujinx.HLE.HOS.Services.Hid.Types.SharedMemory.Npad;
-using Ryujinx.HLE.Ui;
-using Ryujinx.HLE.Ui.Input;
+using Ryujinx.HLE.UI;
+using Ryujinx.HLE.UI.Input;
 using Ryujinx.Memory;
 using System;
 using System.Diagnostics;
@@ -14,6 +14,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 namespace Ryujinx.HLE.HOS.Applets
 {
@@ -51,7 +52,7 @@ namespace Ryujinx.HLE.HOS.Applets
 
         private byte[] _transferMemory;
 
-        private string _textValue = "";
+        private string _textValue = string.Empty;
         private int _cursorBegin = 0;
         private Encoding _encoding = Encoding.Unicode;
         private KeyboardResult _lastResult = KeyboardResult.NotSet;
@@ -62,7 +63,7 @@ namespace Ryujinx.HLE.HOS.Applets
         private bool _canAcceptController = false;
         private KeyboardInputMode _inputMode = KeyboardInputMode.ControllerAndKeyboard;
 
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
 
         public event EventHandler AppletStateChanged;
 
@@ -80,8 +81,8 @@ namespace Ryujinx.HLE.HOS.Applets
 
                 _interactiveSession.DataAvailable += OnInteractiveData;
 
-                var launchParams = _normalSession.Pop();
-                var keyboardConfig = _normalSession.Pop();
+                byte[] launchParams = _normalSession.Pop();
+                byte[] keyboardConfig = _normalSession.Pop();
 
                 _isBackground = keyboardConfig.Length == Unsafe.SizeOf<SoftwareKeyboardInitialize>();
 
@@ -92,14 +93,14 @@ namespace Ryujinx.HLE.HOS.Applets
                     _keyboardBackgroundInitialize = MemoryMarshal.Read<SoftwareKeyboardInitialize>(keyboardConfig);
                     _backgroundState = InlineKeyboardState.Uninitialized;
 
-                    if (_device.UiHandler == null)
+                    if (_device.UIHandler == null)
                     {
                         Logger.Error?.Print(LogClass.ServiceAm, "GUI Handler is not set, software keyboard applet will not work properly");
                     }
                     else
                     {
                         // Create a text handler that converts keyboard strokes to strings.
-                        _dynamicTextInputHandler = _device.UiHandler.CreateDynamicTextInputHandler();
+                        _dynamicTextInputHandler = _device.UIHandler.CreateDynamicTextInputHandler();
                         _dynamicTextInputHandler.TextChangedEvent += HandleTextChangedEvent;
                         _dynamicTextInputHandler.KeyPressedEvent += HandleKeyPressedEvent;
 
@@ -107,7 +108,8 @@ namespace Ryujinx.HLE.HOS.Applets
                         _npads.NpadButtonDownEvent += HandleNpadButtonDownEvent;
                         _npads.NpadButtonUpEvent += HandleNpadButtonUpEvent;
 
-                        _keyboardRenderer = new SoftwareKeyboardRenderer(_device.UiHandler.HostUiTheme);
+                        if (!OperatingSystem.IsIOS())
+                            _keyboardRenderer = new SoftwareKeyboardRenderer(_device.UIHandler.HostUITheme);
                     }
 
                     return ResultCode.Success;
@@ -144,26 +146,21 @@ namespace Ryujinx.HLE.HOS.Applets
             }
         }
 
-        public ResultCode GetResult()
-        {
-            return ResultCode.Success;
-        }
-
         private bool IsKeyboardActive()
         {
-            return _backgroundState >= InlineKeyboardState.Appearing && _backgroundState < InlineKeyboardState.Disappearing;
+            return _backgroundState is >= InlineKeyboardState.Appearing and < InlineKeyboardState.Disappearing;
         }
 
         private bool InputModeControllerEnabled()
         {
-            return _inputMode == KeyboardInputMode.ControllerAndKeyboard ||
-                   _inputMode == KeyboardInputMode.ControllerOnly;
+            return _inputMode is KeyboardInputMode.ControllerAndKeyboard or
+                   KeyboardInputMode.ControllerOnly;
         }
 
         private bool InputModeTypingEnabled()
         {
-            return _inputMode == KeyboardInputMode.ControllerAndKeyboard ||
-                   _inputMode == KeyboardInputMode.KeyboardOnly;
+            return _inputMode is KeyboardInputMode.ControllerAndKeyboard or
+                   KeyboardInputMode.KeyboardOnly;
         }
 
         private void AdvanceInputMode()
@@ -199,7 +196,7 @@ namespace Ryujinx.HLE.HOS.Applets
                 _keyboardForegroundConfig.StringLengthMax = 100;
             }
 
-            if (_device.UiHandler == null)
+            if (_device.UIHandler == null)
             {
                 Logger.Warning?.Print(LogClass.Application, "GUI Handler is not set. Falling back to default");
 
@@ -209,7 +206,7 @@ namespace Ryujinx.HLE.HOS.Applets
             else
             {
                 // Call the configured GUI handler to get user's input.
-                var args = new SoftwareKeyboardUiArgs
+                SoftwareKeyboardUIArgs args = new()
                 {
                     KeyboardMode = _keyboardForegroundConfig.Mode,
                     HeaderText = StripUnicodeControlCodes(_keyboardForegroundConfig.HeaderText),
@@ -222,7 +219,7 @@ namespace Ryujinx.HLE.HOS.Applets
                     InitialText = initialText,
                 };
 
-                _lastResult = _device.UiHandler.DisplayInputDialog(args, out _textValue) ? KeyboardResult.Accept : KeyboardResult.Cancel;
+                _lastResult = _device.UIHandler.DisplayInputDialog(args, out _textValue) ? KeyboardResult.Accept : KeyboardResult.Cancel;
                 _textValue ??= initialText ?? DefaultInputText;
             }
 
@@ -269,7 +266,7 @@ namespace Ryujinx.HLE.HOS.Applets
         private void OnInteractiveData(object sender, EventArgs e)
         {
             // Obtain the validation status response.
-            var data = _interactiveSession.Pop();
+            byte[] data = _interactiveSession.Pop();
 
             if (_isBackground)
             {
@@ -324,7 +321,7 @@ namespace Ryujinx.HLE.HOS.Applets
             using MemoryStream stream = new(data);
             using BinaryReader reader = new(stream);
 
-            var request = (InlineKeyboardRequest)reader.ReadUInt32();
+            InlineKeyboardRequest request = (InlineKeyboardRequest)reader.ReadUInt32();
 
             long remaining;
 
@@ -369,6 +366,7 @@ namespace Ryujinx.HLE.HOS.Applets
                             }
                         }
                     }
+
                     _interactiveSession.Push(InlineResponses.ReleasedUserWordInfo(_backgroundState));
                     break;
                 case InlineKeyboardRequest.SetCustomizeDic:
@@ -382,6 +380,7 @@ namespace Ryujinx.HLE.HOS.Applets
                     {
                         _keyboardBackgroundDic = reader.ReadStruct<SoftwareKeyboardCustomizeDic>();
                     }
+
                     break;
                 case InlineKeyboardRequest.SetCustomizedDictionaries:
                     // Read the custom dictionaries data.
@@ -394,6 +393,7 @@ namespace Ryujinx.HLE.HOS.Applets
                     {
                         _keyboardBackgroundDictSet = reader.ReadStruct<SoftwareKeyboardDictSet>();
                     }
+
                     break;
                 case InlineKeyboardRequest.Calc:
                     // The Calc request is used to communicate configuration changes and commands to the keyboard.
@@ -404,14 +404,14 @@ namespace Ryujinx.HLE.HOS.Applets
                     remaining = stream.Length - stream.Position;
                     if (remaining == Marshal.SizeOf<SoftwareKeyboardCalc>())
                     {
-                        var keyboardCalcData = reader.ReadBytes((int)remaining);
-                        var keyboardCalc = ReadStruct<SoftwareKeyboardCalc>(keyboardCalcData);
+                        byte[] keyboardCalcData = reader.ReadBytes((int)remaining);
+                        SoftwareKeyboardCalc keyboardCalc = ReadStruct<SoftwareKeyboardCalc>(keyboardCalcData);
 
                         newCalc = keyboardCalc.ToExtended();
                     }
                     else if (remaining == Marshal.SizeOf<SoftwareKeyboardCalcEx>() || remaining == SoftwareKeyboardCalcEx.AlternativeSize)
                     {
-                        var keyboardCalcData = reader.ReadBytes((int)remaining);
+                        byte[] keyboardCalcData = reader.ReadBytes((int)remaining);
 
                         newCalc = ReadStruct<SoftwareKeyboardCalcEx>(keyboardCalcData);
                     }
@@ -459,7 +459,7 @@ namespace Ryujinx.HLE.HOS.Applets
                     if (updateText)
                     {
                         _dynamicTextInputHandler.SetText(_textValue, _cursorBegin);
-                        _keyboardRenderer.UpdateTextState(_textValue, _cursorBegin, _cursorBegin, null, null);
+                        _keyboardRenderer?.UpdateTextState(_textValue, _cursorBegin, _cursorBegin, null, null);
                     }
 
                     if ((newCalc.Flags & KeyboardCalcFlags.MustShow) != 0)
@@ -504,8 +504,8 @@ namespace Ryujinx.HLE.HOS.Applets
 
             _dynamicTextInputHandler.TextProcessingEnabled = true;
 
-            _keyboardRenderer.UpdateCommandState(null, null, true);
-            _keyboardRenderer.UpdateTextState(null, null, null, null, true);
+            _keyboardRenderer?.UpdateCommandState(null, null, true);
+            _keyboardRenderer?.UpdateTextState(null, null, null, null, true);
         }
 
         private void DeactivateFrontend()
@@ -557,8 +557,8 @@ namespace Ryujinx.HLE.HOS.Applets
 
                         _dynamicTextInputHandler.TextProcessingEnabled = typingEnabled;
 
-                        _keyboardRenderer.UpdateTextState(null, null, null, null, typingEnabled);
-                        _keyboardRenderer.UpdateCommandState(null, null, controllerEnabled);
+                        _keyboardRenderer?.UpdateTextState(null, null, null, null, typingEnabled);
+                        _keyboardRenderer?.UpdateCommandState(null, null, controllerEnabled);
                     }
                 }
             }
@@ -585,7 +585,7 @@ namespace Ryujinx.HLE.HOS.Applets
 
                 _textValue = text;
                 _cursorBegin = cursorBegin;
-                _keyboardRenderer.UpdateTextState(text, cursorBegin, cursorEnd, overwriteMode, null);
+                _keyboardRenderer?.UpdateTextState(text, cursorBegin, cursorEnd, overwriteMode, null);
 
                 PushUpdatedState(text, cursorBegin, KeyboardResult.NotSet);
             }
@@ -603,10 +603,10 @@ namespace Ryujinx.HLE.HOS.Applets
                 switch (button)
                 {
                     case NpadButton.A:
-                        _keyboardRenderer.UpdateCommandState(_canAcceptController, null, null);
+                        _keyboardRenderer?.UpdateCommandState(_canAcceptController, null, null);
                         break;
                     case NpadButton.B:
-                        _keyboardRenderer.UpdateCommandState(null, _canAcceptController, null);
+                        _keyboardRenderer?.UpdateCommandState(null, _canAcceptController, null);
                         break;
                 }
             }
@@ -622,11 +622,11 @@ namespace Ryujinx.HLE.HOS.Applets
                 {
                     case NpadButton.A:
                         result = KeyboardResult.Accept;
-                        _keyboardRenderer.UpdateCommandState(false, null, null);
+                        _keyboardRenderer?.UpdateCommandState(false, null, null);
                         break;
                     case NpadButton.B:
                         result = KeyboardResult.Cancel;
-                        _keyboardRenderer.UpdateCommandState(null, false, null);
+                        _keyboardRenderer?.UpdateCommandState(null, false, null);
                         break;
                 }
 

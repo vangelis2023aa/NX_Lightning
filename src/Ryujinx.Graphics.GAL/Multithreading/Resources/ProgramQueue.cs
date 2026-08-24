@@ -22,7 +22,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
             _renderer = renderer;
 
             _toCompile = new Queue<IProgramRequest>();
-            _inProgress = new List<ThreadedProgram>();
+            _inProgress = [];
         }
 
         public void Add(IProgramRequest request)
@@ -81,6 +81,25 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
                 }
 
                 _inProgress.Add(program.Threaded);
+            }
+        }
+
+        /// <summary>
+        /// Process the queue until the given program object has been created.
+        /// </summary>
+        /// <param name="program">The program to wait for</param>
+        public void EnsureProgramCreated(ThreadedProgram program)
+        {
+            Span<SpinWait> spinWait = stackalloc SpinWait[1];
+
+            while (program.Base == null)
+            {
+                ProcessQueue();
+
+                if (program.Base == null)
+                {
+                    spinWait[0].SpinOnce(-1);
+                }
             }
         }
 

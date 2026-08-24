@@ -1,8 +1,7 @@
 using ARMeilleure.IntermediateRepresentation;
 using ARMeilleure.Translation;
 using Ryujinx.Common.Memory.PartialUnmaps;
-using System;
-
+using System.Runtime.InteropServices;
 using static ARMeilleure.IntermediateRepresentation.Operand.Factory;
 
 namespace ARMeilleure.Signal
@@ -10,17 +9,37 @@ namespace ARMeilleure.Signal
     /// <summary>
     /// Methods to handle signals caused by partial unmaps. See the structs for C# implementations of the methods.
     /// </summary>
-    internal static class WindowsPartialUnmapHandler
+    internal static partial class WindowsPartialUnmapHandler
     {
+        [LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "LoadLibraryA")]
+        private static partial nint LoadLibrary([MarshalAs(UnmanagedType.LPStr)] string lpFileName);
+
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        private static partial nint GetProcAddress(nint hModule, [MarshalAs(UnmanagedType.LPStr)] string procName);
+
+        private static nint _getCurrentThreadIdPtr;
+
+        public static nint GetCurrentThreadIdFunc()
+        {
+            if (_getCurrentThreadIdPtr == nint.Zero)
+            {
+                nint handle = LoadLibrary("kernel32.dll");
+
+                _getCurrentThreadIdPtr = GetProcAddress(handle, "GetCurrentThreadId");
+            }
+
+            return _getCurrentThreadIdPtr;
+        }
+
         public static Operand EmitRetryFromAccessViolation(EmitterContext context)
         {
-            IntPtr partialRemapStatePtr = PartialUnmapState.GlobalState;
-            IntPtr localCountsPtr = IntPtr.Add(partialRemapStatePtr, PartialUnmapState.LocalCountsOffset);
+            nint partialRemapStatePtr = PartialUnmapState.GlobalState;
+            nint localCountsPtr = nint.Add(partialRemapStatePtr, PartialUnmapState.LocalCountsOffset);
 
             // Get the lock first.
-            EmitNativeReaderLockAcquire(context, IntPtr.Add(partialRemapStatePtr, PartialUnmapState.PartialUnmapLockOffset));
+            EmitNativeReaderLockAcquire(context, nint.Add(partialRemapStatePtr, PartialUnmapState.PartialUnmapLockOffset));
 
-            IntPtr getCurrentThreadId = WindowsSignalHandlerRegistration.GetCurrentThreadIdFunc();
+            nint getCurrentThreadId = GetCurrentThreadIdFunc();
             Operand threadId = context.Call(Const((ulong)getCurrentThreadId), OperandType.I32);
             Operand threadIndex = EmitThreadLocalMapIntGetOrReserve(context, localCountsPtr, threadId, Const(0));
 
@@ -38,7 +57,7 @@ namespace ARMeilleure.Signal
 
             Operand threadLocalPartialUnmapsPtr = EmitThreadLocalMapIntGetValuePtr(context, localCountsPtr, threadIndex);
             Operand threadLocalPartialUnmaps = context.Load(OperandType.I32, threadLocalPartialUnmapsPtr);
-            Operand partialUnmapsCount = context.Load(OperandType.I32, Const((ulong)IntPtr.Add(partialRemapStatePtr, PartialUnmapState.PartialUnmapsCountOffset)));
+            Operand partialUnmapsCount = context.Load(OperandType.I32, Const((ulong)nint.Add(partialRemapStatePtr, PartialUnmapState.PartialUnmapsCountOffset)));
 
             context.Copy(retry, context.ICompareNotEqual(threadLocalPartialUnmaps, partialUnmapsCount));
 
@@ -59,14 +78,14 @@ namespace ARMeilleure.Signal
             context.MarkLabel(endLabel);
 
             // Finally, release the lock and return the retry value.
-            EmitNativeReaderLockRelease(context, IntPtr.Add(partialRemapStatePtr, PartialUnmapState.PartialUnmapLockOffset));
+            EmitNativeReaderLockRelease(context, nint.Add(partialRemapStatePtr, PartialUnmapState.PartialUnmapLockOffset));
 
             return retry;
         }
 
-        public static Operand EmitThreadLocalMapIntGetOrReserve(EmitterContext context, IntPtr threadLocalMapPtr, Operand threadId, Operand initialState)
+        public static Operand EmitThreadLocalMapIntGetOrReserve(EmitterContext context, nint threadLocalMapPtr, Operand threadId, Operand initialState)
         {
-            Operand idsPtr = Const((ulong)IntPtr.Add(threadLocalMapPtr, ThreadLocalMap<int>.ThreadIdsOffset));
+            Operand idsPtr = Const((ulong)nint.Add(threadLocalMapPtr, ThreadLocalMap<int>.ThreadIdsOffset));
 
             Operand i = context.AllocateLocal(OperandType.I32);
 
@@ -110,7 +129,7 @@ namespace ARMeilleure.Signal
             // If it was 0, then we need to initialize the struct entry and return i.
             context.BranchIfFalse(idNot0Label, context.ICompareEqual(existingId2, Const(0)));
 
-            Operand structsPtr = Const((ulong)IntPtr.Add(threadLocalMapPtr, ThreadLocalMap<int>.StructsOffset));
+            Operand structsPtr = Const((ulong)nint.Add(threadLocalMapPtr, ThreadLocalMap<int>.StructsOffset));
             Operand structPtr = context.Add(structsPtr, context.SignExtend32(OperandType.I64, offset2));
             context.Store(structPtr, initialState);
 
@@ -129,24 +148,13 @@ namespace ARMeilleure.Signal
             return context.Copy(i);
         }
 
-        private static Operand EmitThreadLocalMapIntGetValuePtr(EmitterContext context, IntPtr threadLocalMapPtr, Operand index)
+        private static Operand EmitThreadLocalMapIntGetValuePtr(EmitterContext context, nint threadLocalMapPtr, Operand index)
         {
             Operand offset = context.Multiply(index, Const(sizeof(int)));
-            Operand structsPtr = Const((ulong)IntPtr.Add(threadLocalMapPtr, ThreadLocalMap<int>.StructsOffset));
+            Operand structsPtr = Const((ulong)nint.Add(threadLocalMapPtr, ThreadLocalMap<int>.StructsOffset));
 
             return context.Add(structsPtr, context.SignExtend32(OperandType.I64, offset));
         }
-
-#pragma warning disable IDE0051 // Remove unused private member
-        private static void EmitThreadLocalMapIntRelease(EmitterContext context, IntPtr threadLocalMapPtr, Operand threadId, Operand index)
-        {
-            Operand offset = context.Multiply(index, Const(sizeof(int)));
-            Operand idsPtr = Const((ulong)IntPtr.Add(threadLocalMapPtr, ThreadLocalMap<int>.ThreadIdsOffset));
-            Operand idPtr = context.Add(idsPtr, context.SignExtend32(OperandType.I64, offset));
-
-            context.CompareAndSwap(idPtr, threadId, Const(0));
-        }
-#pragma warning restore IDE0051
 
         private static void EmitAtomicAddI32(EmitterContext context, Operand ptr, Operand additive)
         {
@@ -161,9 +169,9 @@ namespace ARMeilleure.Signal
             context.BranchIfFalse(loop, context.ICompareEqual(initial, replaced));
         }
 
-        private static void EmitNativeReaderLockAcquire(EmitterContext context, IntPtr nativeReaderLockPtr)
+        private static void EmitNativeReaderLockAcquire(EmitterContext context, nint nativeReaderLockPtr)
         {
-            Operand writeLockPtr = Const((ulong)IntPtr.Add(nativeReaderLockPtr, NativeReaderWriterLock.WriteLockOffset));
+            Operand writeLockPtr = Const((ulong)nint.Add(nativeReaderLockPtr, NativeReaderWriterLock.WriteLockOffset));
 
             // Spin until we can acquire the write lock.
             Operand spinLabel = Label();
@@ -173,16 +181,16 @@ namespace ARMeilleure.Signal
             context.BranchIfTrue(spinLabel, context.CompareAndSwap(writeLockPtr, Const(0), Const(1)));
 
             // Increment reader count.
-            EmitAtomicAddI32(context, Const((ulong)IntPtr.Add(nativeReaderLockPtr, NativeReaderWriterLock.ReaderCountOffset)), Const(1));
+            EmitAtomicAddI32(context, Const((ulong)nint.Add(nativeReaderLockPtr, NativeReaderWriterLock.ReaderCountOffset)), Const(1));
 
             // Release write lock.
             context.CompareAndSwap(writeLockPtr, Const(1), Const(0));
         }
 
-        private static void EmitNativeReaderLockRelease(EmitterContext context, IntPtr nativeReaderLockPtr)
+        private static void EmitNativeReaderLockRelease(EmitterContext context, nint nativeReaderLockPtr)
         {
             // Decrement reader count.
-            EmitAtomicAddI32(context, Const((ulong)IntPtr.Add(nativeReaderLockPtr, NativeReaderWriterLock.ReaderCountOffset)), Const(-1));
+            EmitAtomicAddI32(context, Const((ulong)nint.Add(nativeReaderLockPtr, NativeReaderWriterLock.ReaderCountOffset)), Const(-1));
         }
     }
 }

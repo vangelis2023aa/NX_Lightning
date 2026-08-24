@@ -1,13 +1,13 @@
-using Ryujinx.HLE.Ui;
+using Ryujinx.HLE.UI;
 
 namespace Ryujinx.HLE.HOS.Applets.SoftwareKeyboard
 {
     /// <summary>
     /// TODO
     /// </summary>
-    internal class SoftwareKeyboardUiState
+    internal class SoftwareKeyboardUIState
     {
-        public string InputText = "";
+        public string InputText = string.Empty;
         public int CursorBegin = 0;
         public int CursorEnd = 0;
         public bool AcceptPressed = false;

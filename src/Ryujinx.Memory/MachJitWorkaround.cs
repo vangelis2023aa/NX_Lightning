@@ -11,22 +11,22 @@ namespace Ryujinx.Memory
         public static partial int mach_task_self();
 
         [LibraryImport("libc")]
-        public static partial int mach_make_memory_entry_64(IntPtr target_task, IntPtr* size, IntPtr offset, int permission, IntPtr* object_handle, IntPtr parent_entry);
+        public static partial int mach_make_memory_entry_64(nint target_task, nint* size, nint offset, int permission, nint* object_handle, nint parent_entry);
 
         [LibraryImport("libc")]
-        public static partial int mach_memory_entry_ownership(IntPtr mem_entry, IntPtr owner, int ledger_tag, int ledger_flags);
+        public static partial int mach_memory_entry_ownership(nint mem_entry, nint owner, int ledger_tag, int ledger_flags);
 
         [LibraryImport("libc")]
-        public static partial int vm_map(IntPtr target_task, IntPtr* address, IntPtr size, IntPtr mask, int flags, IntPtr obj, IntPtr offset, int copy, int cur_protection, int max_protection, int inheritance);
+        public static partial int vm_map(nint target_task, nint* address, nint size, nint mask, int flags, nint obj, nint offset, int copy, int cur_protection, int max_protection, int inheritance);
 
         [LibraryImport("libc")]
-        public static partial int vm_allocate(IntPtr target_task, IntPtr* address, IntPtr size, int flags);
+        public static partial int vm_allocate(nint target_task, nint* address, nint size, int flags);
 
         [LibraryImport("libc")]
-        public static partial int vm_deallocate(IntPtr target_task, IntPtr address, IntPtr size);
+        public static partial int vm_deallocate(nint target_task, nint address, nint size);
 
         [LibraryImport("libc")]
-        public static partial int vm_remap(IntPtr target_task, IntPtr* target_address, IntPtr size, IntPtr mask, int flags, IntPtr src_task, IntPtr src_address, int copy, int* cur_protection, int* max_protection, int inheritance);
+        public static partial int vm_remap(nint target_task, nint* target_address, nint size, nint mask, int flags, nint src_task, nint src_address, int copy, int* cur_protection, int* max_protection, int inheritance);
 
         const int MAP_MEM_LEDGER_TAGGED = 0x002000;
         const int MAP_MEM_NAMED_CREATE = 0x020000;
@@ -45,13 +45,13 @@ namespace Ryujinx.Memory
         const int VM_FLAGS_ANYWHERE = 0x0001;
         const int VM_FLAGS_OVERWRITE = 0x4000;
 
-        const IntPtr TASK_NULL = 0;
+        const nint TASK_NULL = 0;
 
-        public static void ReallocateBlock(IntPtr address, int size)
+        public static void ReallocateBlock(nint address, int size)
         {
-            IntPtr selfTask = mach_task_self();
-            IntPtr memorySize = (IntPtr)size;
-            IntPtr memoryObjectPort = IntPtr.Zero;
+            nint selfTask = mach_task_self();
+            nint memorySize = (nint)size;
+            nint memoryObjectPort = nint.Zero;
 
             int err = mach_make_memory_entry_64(selfTask, &memorySize, 0, MAP_MEM_NAMED_CREATE | MAP_MEM_LEDGER_TAGGED | VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE, &memoryObjectPort, 0);
 
@@ -62,7 +62,7 @@ namespace Ryujinx.Memory
 
             try
             {
-                if (memorySize != (IntPtr)size)
+                if (memorySize != (nint)size)
                 {
                     throw new InvalidOperationException($"Created with size {memorySize} instead of {size}.");
                 }
@@ -74,7 +74,7 @@ namespace Ryujinx.Memory
                     throw new InvalidOperationException($"Failed to set ownership: {err}");
                 }
 
-                IntPtr mapAddress = address;
+                nint mapAddress = address;
 
                 err = vm_map(
                     selfTask,
@@ -107,11 +107,11 @@ namespace Ryujinx.Memory
             Console.WriteLine($"Reallocated an area... {address:x16}");
         }
 
-        public static void ReallocateAreaWithOwnership(IntPtr address, int size)
+        public static void ReallocateAreaWithOwnership(nint address, int size)
         {
             int mapChunkSize = 128 * 1024 * 1024;
-            IntPtr endAddress = address + size;
-            IntPtr blockAddress = address;
+            nint endAddress = address + size;
+            nint blockAddress = address;
             while (blockAddress < endAddress)
             {
                 int blockSize = Math.Min(mapChunkSize, (int)(endAddress - blockAddress));
@@ -122,11 +122,11 @@ namespace Ryujinx.Memory
             }
         }
 
-        public static IntPtr AllocateSharedMemory(ulong size, bool reserve)
+        public static nint AllocateSharedMemory(ulong size, bool reserve)
         {
-            IntPtr address = 0;
+            nint address = 0;
 
-            int err = vm_allocate(mach_task_self(), &address, (IntPtr)size, VM_FLAGS_ANYWHERE);
+            int err = vm_allocate(mach_task_self(), &address, (nint)size, VM_FLAGS_ANYWHERE);
 
             if (err != 0)
             {
@@ -136,21 +136,21 @@ namespace Ryujinx.Memory
             return address;
         }
 
-        public static void DestroySharedMemory(IntPtr handle, ulong size)
+        public static void DestroySharedMemory(nint handle, ulong size)
         {
-            vm_deallocate(mach_task_self(), handle, (IntPtr)size);
+            vm_deallocate(mach_task_self(), handle, (nint)size);
         }
 
-        public static IntPtr MapView(IntPtr sharedMemory, ulong srcOffset, IntPtr location, ulong size)
+        public static nint MapView(nint sharedMemory, ulong srcOffset, nint location, ulong size)
         {
-            IntPtr taskSelf = mach_task_self();
-            IntPtr srcAddress = (IntPtr)((ulong)sharedMemory + srcOffset);
-            IntPtr dstAddress = location;
+            nint taskSelf = mach_task_self();
+            nint srcAddress = (nint)((ulong)sharedMemory + srcOffset);
+            nint dstAddress = location;
 
             int cur_protection = 0;
             int max_protection = 0;
 
-            int err = vm_remap(taskSelf, &dstAddress, (IntPtr)size, 0, VM_FLAGS_OVERWRITE, taskSelf, srcAddress, 0, &cur_protection, &max_protection, VM_INHERIT_DEFAULT);
+            int err = vm_remap(taskSelf, &dstAddress, (nint)size, 0, VM_FLAGS_OVERWRITE, taskSelf, srcAddress, 0, &cur_protection, &max_protection, VM_INHERIT_DEFAULT);
 
             if (err != 0)
             {
@@ -160,9 +160,9 @@ namespace Ryujinx.Memory
             return dstAddress;
         }
 
-        public static void UnmapView(IntPtr location, ulong size)
+        public static void UnmapView(nint location, ulong size)
         {
-            vm_deallocate(mach_task_self(), location, (IntPtr)size);
+            vm_deallocate(mach_task_self(), location, (nint)size);
         }
     }
 }

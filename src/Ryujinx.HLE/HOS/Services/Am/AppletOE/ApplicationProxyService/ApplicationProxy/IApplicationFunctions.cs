@@ -22,7 +22,7 @@ using ApplicationId = LibHac.Ncm.ApplicationId;
 
 namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.ApplicationProxy
 {
-    class IApplicationFunctions : IpcService
+    partial class IApplicationFunctions : IpcService
     {
         private long _defaultSaveDataSize = 200000000;
         private long _defaultJournalSaveDataSize = 200000000;
@@ -31,11 +31,13 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
         private readonly KEvent _friendInvitationStorageChannelEvent;
         private readonly KEvent _notificationStorageChannelEvent;
         private readonly KEvent _healthWarningDisappearedSystemEvent;
+        private readonly KEvent _unknownEvent;
 
         private int _gpuErrorDetectedSystemEventHandle;
         private int _friendInvitationStorageChannelEventHandle;
         private int _notificationStorageChannelEventHandle;
         private int _healthWarningDisappearedSystemEventHandle;
+        private int _unknownEventHandle;
 
         private bool _gamePlayRecordingState;
 
@@ -50,6 +52,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
             _friendInvitationStorageChannelEvent = new KEvent(system.KernelContext);
             _notificationStorageChannelEvent = new KEvent(system.KernelContext);
             _healthWarningDisappearedSystemEvent = new KEvent(system.KernelContext);
+            _unknownEvent = new KEvent(system.KernelContext);
 
             _horizon = system.LibHacHorizonManager.AmClient;
         }
@@ -97,7 +100,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
 
             if (titleId == 0)
             {
-                context.Device.UiHandler.ExecuteProgram(context.Device, ProgramSpecifyKind.RestartProgram, titleId);
+                context.Device.UIHandler.ExecuteProgram(context.Device, ProgramSpecifyKind.RestartProgram, titleId);
             }
             else
             {
@@ -524,7 +527,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
 
             Logger.Stub?.PrintStub(LogClass.ServiceAm, new { kind, value });
 
-            context.Device.UiHandler.ExecuteProgram(context.Device, kind, value);
+            context.Device.UIHandler.ExecuteProgram(context.Device, kind, value);
 
             return ResultCode.Success;
         }
@@ -647,6 +650,23 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
 
             return ResultCode.Success;
         }
+        
+        [CommandCmif(210)] // 20.0.0+
+        // GetUnknownEvent() -> handle<copy>
+        public ResultCode GetUnknownEvent(ServiceCtx context)
+        {
+            if (_unknownEventHandle == 0)
+            {
+                if (context.Process.HandleTable.GenerateHandle(_unknownEvent.ReadableEvent, out _unknownEventHandle) != Result.Success)
+                {
+                    throw new InvalidOperationException("Out of handles!");
+                }
+            }
+
+            context.Response.HandleDesc = IpcHandleDesc.MakeCopy(_unknownEventHandle);
+
+            return ResultCode.Success;
+        }
 
         [CommandCmif(1001)] // 10.0.0+
         // PrepareForJit()
@@ -659,7 +679,7 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.Applicati
 
                 if (string.IsNullOrWhiteSpace(filePath))
                 {
-                    throw new InvalidSystemResourceException("JIT (010000000000003B) system title not found! The JIT will not work, provide the system archive to fix this error. (See https://github.com/Ryujinx/Ryujinx#requirements for more information)");
+                    throw new InvalidSystemResourceException("JIT (010000000000003B) system title not found! The JIT will not work, provide the system archive to fix this error.");
                 }
 
                 context.Device.LoadNca(filePath);

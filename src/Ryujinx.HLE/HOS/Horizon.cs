@@ -4,13 +4,8 @@ using LibHac.Fs;
 using LibHac.Fs.Shim;
 using LibHac.FsSystem;
 using LibHac.Tools.FsSystem;
-using Ryujinx.Audio;
-using Ryujinx.Audio.Input;
-using Ryujinx.Audio.Integration;
-using Ryujinx.Audio.Output;
-using Ryujinx.Audio.Renderer.Device;
-using Ryujinx.Audio.Renderer.Server;
 using Ryujinx.Cpu;
+using Ryujinx.HLE.Debugger;
 using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.HOS.Kernel;
 using Ryujinx.HLE.HOS.Kernel.Memory;
@@ -20,10 +15,12 @@ using Ryujinx.HLE.HOS.Services;
 using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.SystemAppletProxy;
 using Ryujinx.HLE.HOS.Services.Apm;
-using Ryujinx.HLE.HOS.Services.Audio.AudioRenderer;
 using Ryujinx.HLE.HOS.Services.Caps;
 using Ryujinx.HLE.HOS.Services.Mii;
+using Ryujinx.HLE.HOS.Services.Nfc.AmiiboDecryption;
+using Ryujinx.HLE.HOS.Services.Nfc.Nfp;
 using Ryujinx.HLE.HOS.Services.Nfc.Nfp.NfpManager;
+using Ryujinx.HLE.HOS.Services.Nfc.Mifare.MifareManager;
 using Ryujinx.HLE.HOS.Services.Nv;
 using Ryujinx.HLE.HOS.Services.Nv.NvDrvServices.NvHostCtrl;
 using Ryujinx.HLE.HOS.Services.Pcv.Bpc;
@@ -61,11 +58,6 @@ namespace Ryujinx.HLE.HOS
         internal ITickSource TickSource { get; }
 
         internal SurfaceFlinger SurfaceFlinger { get; private set; }
-        internal AudioManager AudioManager { get; private set; }
-        internal AudioOutputManager AudioOutputManager { get; private set; }
-        internal AudioInputManager AudioInputManager { get; private set; }
-        internal AudioRendererManager AudioRendererManager { get; private set; }
-        internal VirtualDeviceSessionRegistry AudioDeviceSessionRegistry { get; private set; }
 
         public SystemStateMgr State { get; private set; }
 
@@ -75,12 +67,12 @@ namespace Ryujinx.HLE.HOS
 
         internal List<NfpDevice> NfpDevices { get; private set; }
 
+        internal List<NfcDevice> NfcDevices { get; private set; }
+
         internal SmRegistry SmRegistry { get; private set; }
 
         internal ServerBase SmServer { get; private set; }
         internal ServerBase BsdServer { get; private set; }
-        internal ServerBase AudRenServer { get; private set; }
-        internal ServerBase AudOutServer { get; private set; }
         internal ServerBase FsServer { get; private set; }
         internal ServerBase HidServer { get; private set; }
         internal ServerBase NvDrvServer { get; private set; }
@@ -133,8 +125,8 @@ namespace Ryujinx.HLE.HOS
                 TickSource,
                 device,
                 device.Memory,
-                device.Configuration.MemoryConfiguration.ToKernelMemorySize(),
-                device.Configuration.MemoryConfiguration.ToKernelMemoryArrange());
+                device.Configuration.MemoryConfiguration.KernelMemorySize,
+                device.Configuration.MemoryConfiguration.KernelMemoryArrange);
 
             Device = device;
 
@@ -142,7 +134,8 @@ namespace Ryujinx.HLE.HOS
 
             PerformanceState = new PerformanceState();
 
-            NfpDevices = new List<NfpDevice>();
+            NfpDevices = [];
+            NfcDevices = [];
 
             // Note: This is not really correct, but with HLE of services, the only memory
             // region used that is used is Application, so we can use the other ones for anything.
@@ -166,11 +159,11 @@ namespace Ryujinx.HLE.HOS
             timePageList.AddRange(timePa, TimeSize / KPageTableBase.PageSize);
             appletCaptureBufferPageList.AddRange(appletCaptureBufferPa, AppletCaptureBufferSize / KPageTableBase.PageSize);
 
-            var hidStorage = new SharedMemoryStorage(KernelContext, hidPageList);
-            var fontStorage = new SharedMemoryStorage(KernelContext, fontPageList);
-            var iirsStorage = new SharedMemoryStorage(KernelContext, iirsPageList);
-            var timeStorage = new SharedMemoryStorage(KernelContext, timePageList);
-            var appletCaptureBufferStorage = new SharedMemoryStorage(KernelContext, appletCaptureBufferPageList);
+            SharedMemoryStorage hidStorage = new(KernelContext, hidPageList);
+            SharedMemoryStorage fontStorage = new(KernelContext, fontPageList);
+            SharedMemoryStorage iirsStorage = new(KernelContext, iirsPageList);
+            SharedMemoryStorage timeStorage = new(KernelContext, timePageList);
+            SharedMemoryStorage appletCaptureBufferStorage = new(KernelContext, appletCaptureBufferPageList);
 
             HidStorage = hidStorage;
 
@@ -248,79 +241,26 @@ namespace Ryujinx.HLE.HOS
             HostSyncpoint = new NvHostSyncpt(device);
 
             SurfaceFlinger = new SurfaceFlinger(device);
-
-            InitializeAudioRenderer(TickSource);
-            InitializeServices();
         }
 
-        private void InitializeAudioRenderer(ITickSource tickSource)
-        {
-            AudioManager = new AudioManager();
-            AudioOutputManager = new AudioOutputManager();
-            AudioInputManager = new AudioInputManager();
-            AudioRendererManager = new AudioRendererManager(tickSource);
-            AudioRendererManager.SetVolume(Device.Configuration.AudioVolume);
-            AudioDeviceSessionRegistry = new VirtualDeviceSessionRegistry(Device.AudioDeviceDriver);
-
-            IWritableEvent[] audioOutputRegisterBufferEvents = new IWritableEvent[Constants.AudioOutSessionCountMax];
-
-            for (int i = 0; i < audioOutputRegisterBufferEvents.Length; i++)
-            {
-                KEvent registerBufferEvent = new(KernelContext);
-
-                audioOutputRegisterBufferEvents[i] = new AudioKernelEvent(registerBufferEvent);
-            }
-
-            AudioOutputManager.Initialize(Device.AudioDeviceDriver, audioOutputRegisterBufferEvents);
-            AudioOutputManager.SetVolume(Device.Configuration.AudioVolume);
-
-            IWritableEvent[] audioInputRegisterBufferEvents = new IWritableEvent[Constants.AudioInSessionCountMax];
-
-            for (int i = 0; i < audioInputRegisterBufferEvents.Length; i++)
-            {
-                KEvent registerBufferEvent = new(KernelContext);
-
-                audioInputRegisterBufferEvents[i] = new AudioKernelEvent(registerBufferEvent);
-            }
-
-            AudioInputManager.Initialize(Device.AudioDeviceDriver, audioInputRegisterBufferEvents);
-
-            IWritableEvent[] systemEvents = new IWritableEvent[Constants.AudioRendererSessionCountMax];
-
-            for (int i = 0; i < systemEvents.Length; i++)
-            {
-                KEvent systemEvent = new(KernelContext);
-
-                systemEvents[i] = new AudioKernelEvent(systemEvent);
-            }
-
-            AudioManager.Initialize(Device.AudioDeviceDriver.GetUpdateRequiredEvent(), AudioOutputManager.Update, AudioInputManager.Update);
-
-            AudioRendererManager.Initialize(systemEvents, Device.AudioDeviceDriver);
-
-            AudioManager.Start();
-        }
-
-        private void InitializeServices()
+        public void InitializeServices()
         {
             SmRegistry = new SmRegistry();
-            SmServer = new ServerBase(KernelContext, "SmServer", () => new IUserInterface(KernelContext, SmRegistry));
+            SmServer = new ServerBase(KernelContext, "Sm", () => new IUserInterface(KernelContext, SmRegistry));
 
             // Wait until SM server thread is done with initialization,
             // only then doing connections to SM is safe.
             SmServer.InitDone.WaitOne();
 
-            BsdServer = new ServerBase(KernelContext, "BsdServer");
-            AudRenServer = new ServerBase(KernelContext, "AudioRendererServer");
-            AudOutServer = new ServerBase(KernelContext, "AudioOutServer");
-            FsServer = new ServerBase(KernelContext, "FsServer");
-            HidServer = new ServerBase(KernelContext, "HidServer");
-            NvDrvServer = new ServerBase(KernelContext, "NvservicesServer");
-            TimeServer = new ServerBase(KernelContext, "TimeServer");
-            ViServer = new ServerBase(KernelContext, "ViServerU");
-            ViServerM = new ServerBase(KernelContext, "ViServerM");
-            ViServerS = new ServerBase(KernelContext, "ViServerS");
-            LdnServer = new ServerBase(KernelContext, "LdnServer");
+            BsdServer = new ServerBase(KernelContext, "Bsd");
+            FsServer = new ServerBase(KernelContext, "Fs");
+            HidServer = new ServerBase(KernelContext, "Hid");
+            NvDrvServer = new ServerBase(KernelContext, "Nv");
+            TimeServer = new ServerBase(KernelContext, "Time");
+            ViServer = new ServerBase(KernelContext, "Vi:u");
+            ViServerM = new ServerBase(KernelContext, "Vi:m");
+            ViServerS = new ServerBase(KernelContext, "Vi:s");
+            LdnServer = new ServerBase(KernelContext, "Ldn");
 
             StartNewServices();
         }
@@ -330,9 +270,15 @@ namespace Ryujinx.HLE.HOS
             HorizonFsClient fsClient = new(this);
 
             ServiceTable = new ServiceTable();
-            var services = ServiceTable.GetServices(new HorizonOptions(Device.Configuration.IgnoreMissingServices, LibHacHorizonManager.BcatClient, fsClient));
+            IEnumerable<ServiceEntry> services = ServiceTable.GetServices(new HorizonOptions
+                (Device.Configuration.IgnoreMissingServices,
+                LibHacHorizonManager.BcatClient,
+                fsClient,
+                AccountManager,
+                Device.AudioDeviceDriver,
+                TickSource));
 
-            foreach (var service in services)
+            foreach (ServiceEntry service in services)
             {
                 const ProcessCreationFlags Flags =
                     ProcessCreationFlags.EnableAslr |
@@ -340,16 +286,17 @@ namespace Ryujinx.HLE.HOS
                     ProcessCreationFlags.Is64Bit |
                     ProcessCreationFlags.PoolPartitionSystem;
 
-                ProcessCreationInfo creationInfo = new("Service", 1, 0, 0x8000000, 1, Flags, 0, 0);
+                ProcessCreationInfo creationInfo = new(service.Name, 1, 0, 0x8000000, 1, Flags, 0, 0);
 
-                uint[] defaultCapabilities = {
-                    0x030363F7,
+                uint[] defaultCapabilities =
+                [
+                    (((uint)KScheduler.CpuCoresCount - 1) << 24) + (((uint)KScheduler.CpuCoresCount - 1) << 16) + 0x63F7u,
                     0x1FFFFFCF,
                     0x207FFFEF,
                     0x47E0060F,
                     0x0048BFFF,
-                    0x01007FFF,
-                };
+                    0x01007FFF
+                ];
 
                 // TODO:
                 // - Pass enough information (capabilities, process creation info, etc) on ServiceEntry for proper initialization.
@@ -363,7 +310,7 @@ namespace Ryujinx.HLE.HOS
 
         public bool LoadKip(string kipPath)
         {
-            using var kipFile = new SharedRef<IStorage>(new LocalStorage(kipPath, FileAccess.Read));
+            using SharedRef<IStorage> kipFile = new(new LocalStorage(kipPath, FileAccess.Read));
 
             return ProcessLoaderHelper.LoadKip(KernelContext, new KipExecutable(in kipFile));
         }
@@ -385,17 +332,6 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
-        public void SetVolume(float volume)
-        {
-            AudioOutputManager.SetVolume(volume);
-            AudioRendererManager.SetVolume(volume);
-        }
-
-        public float GetVolume()
-        {
-            return AudioOutputManager.GetVolume() == 0 ? AudioRendererManager.GetVolume() : AudioOutputManager.GetVolume();
-        }
-
         public void ReturnFocus()
         {
             AppletState.SetFocus(true);
@@ -409,11 +345,43 @@ namespace Ryujinx.HLE.HOS
 
         public void ScanAmiibo(int nfpDeviceId, string amiiboId, bool useRandomUuid)
         {
+            if (VirtualAmiibo.ApplicationBytes.Length > 0)
+            {
+                VirtualAmiibo.ApplicationBytes = [];
+                VirtualAmiibo.InputBin = string.Empty;
+            }
+
             if (NfpDevices[nfpDeviceId].State == NfpDeviceState.SearchingForTag)
             {
                 NfpDevices[nfpDeviceId].State = NfpDeviceState.TagFound;
                 NfpDevices[nfpDeviceId].AmiiboId = amiiboId;
                 NfpDevices[nfpDeviceId].UseRandomUuid = useRandomUuid;
+            }
+        }
+        public void ScanAmiiboFromBin(string path)
+        {
+            VirtualAmiibo.InputBin = path;
+            if (VirtualAmiibo.ApplicationBytes.Length > 0)
+            {
+                VirtualAmiibo.ApplicationBytes = [];
+            }
+
+            byte[] encryptedData = File.ReadAllBytes(path);
+            VirtualAmiiboFile newFile = AmiiboBinReader.ReadBinFile(encryptedData);
+            if (SearchingForAmiibo(out int nfpDeviceId))
+            {
+                NfpDevices[nfpDeviceId].State = NfpDeviceState.TagFound;
+                NfpDevices[nfpDeviceId].AmiiboId = newFile.AmiiboId;
+                NfpDevices[nfpDeviceId].UseRandomUuid = false;
+            }
+        }
+
+        public void ScanSkylander(int nfcDeviceId, byte[] data)
+        {
+            if (NfcDevices[nfcDeviceId].State == NfcDeviceState.SearchingForTag)
+            {
+                NfcDevices[nfcDeviceId].State = NfcDeviceState.TagFound;
+                NfcDevices[nfcDeviceId].Data = data;
             }
         }
 
@@ -432,6 +400,53 @@ namespace Ryujinx.HLE.HOS
             }
 
             return false;
+        }
+
+        public bool SearchingForSkylander(out int nfcDeviceId)
+        {
+            nfcDeviceId = default;
+
+            for (int i = 0; i < NfcDevices.Count; i++)
+            {
+                if (NfcDevices[i].State == NfcDeviceState.SearchingForTag)
+                {
+                    nfcDeviceId = i;
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool HasSkylander(out int nfcDeviceId)
+        {
+            nfcDeviceId = default;
+
+            for (int i = 0; i < NfcDevices.Count; i++)
+            {
+                if (NfcDevices[i].State == NfcDeviceState.TagFound)
+                {
+                    nfcDeviceId = i;
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public void RemoveSkylander()
+        {
+            for (int i = 0; i < NfcDevices.Count; i++)
+            {
+                if (NfcDevices[i].State == NfcDeviceState.TagFound)
+                {
+                    NfcDevices[i].State = NfcDeviceState.Initialized;
+                    NfcDevices[i].SignalDeactivate();
+                    Thread.Sleep(100); // NOTE: Simulate skylander scanning delay.
+                }
+            }
         }
 
         public void SignalDisplayResolutionChange()
@@ -459,11 +474,7 @@ namespace Ryujinx.HLE.HOS
                 // "Soft" stops AudioRenderer and AudioManager to avoid some sound between resume and stop.
                 if (IsPaused)
                 {
-                    AudioManager.StopUpdates();
-
                     TogglePauseEmulation(false);
-
-                    AudioRendererManager.StopSendingCommands();
                 }
 
                 KProcess terminationProcess = new(KernelContext);
@@ -514,12 +525,6 @@ namespace Ryujinx.HLE.HOS
                 // This is safe as KThread that are likely to call ioctls are going to be terminated by the post handler hook on the SVC facade.
                 INvDrvServices.Destroy();
 
-                AudioManager.Dispose();
-                AudioOutputManager.Dispose();
-                AudioInputManager.Dispose();
-
-                AudioRendererManager.Dispose();
-
                 if (LibHacHorizonManager.ApplicationClient != null)
                 {
                     LibHacHorizonManager.PmClient.Fs.UnregisterProgram(LibHacHorizonManager.ApplicationClient.Os.GetCurrentProcessId().Value).ThrowIfFailure();
@@ -553,7 +558,24 @@ namespace Ryujinx.HLE.HOS
                     TickSource.Resume();
                 }
             }
+
             IsPaused = pause;
+        }
+
+        internal IDebuggableProcess DebugGetApplicationProcessDebugInterface()
+        {
+            lock (KernelContext.Processes)
+            {
+                return KernelContext.Processes.Values.FirstOrDefault(x => x.IsApplication)?.DebugInterface;
+            }
+        }
+
+        internal KProcess DebugGetApplicationProcess()
+        {
+            lock (KernelContext.Processes)
+            {
+                return KernelContext.Processes.Values.FirstOrDefault(x => x.IsApplication);
+            }
         }
     }
 }

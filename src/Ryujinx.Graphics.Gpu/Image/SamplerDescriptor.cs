@@ -10,8 +10,8 @@ namespace Ryujinx.Graphics.Gpu.Image
     /// </summary>
     struct SamplerDescriptor
     {
-        private static readonly float[] _f5ToF32ConversionLut = new float[]
-        {
+        private static readonly float[] _f5ToF32ConversionLut =
+        [
             0.0f,
             0.055555556f,
             0.1f,
@@ -43,13 +43,13 @@ namespace Ryujinx.Graphics.Gpu.Image
             0.45833334f,
             0.46153846f,
             0.4642857f,
-            0.46666667f,
-        };
+            0.46666667f
+        ];
 
-        private static readonly float[] _maxAnisotropyLut = new float[]
-        {
-            1, 2, 4, 6, 8, 10, 12, 16,
-        };
+        private static readonly float[] _maxAnisotropyLut =
+        [
+            1, 2, 4, 6, 8, 10, 12, 16
+        ];
 
         private const float Frac8ToF32 = 1.0f / 256.0f;
 
@@ -114,6 +114,15 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
+        /// Unpacks the sampler sRGB format flag.
+        /// </summary>
+        /// <returns>True if the has sampler is sRGB conversion enabled, false otherwise</returns>
+        public readonly bool UnpackSrgb()
+        {
+            return (Word0 & (1 << 13)) != 0;
+        }
+
+        /// <summary>
         /// Unpacks and converts the maximum anisotropy value used for texture anisotropic filtering.
         /// </summary>
         /// <returns>The maximum anisotropy</returns>
@@ -166,6 +175,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                         case SamplerMinFilter.Linear:
                             return MinFilter.Linear;
                     }
+
                     break;
 
                 case SamplerMipFilter.Nearest:
@@ -176,6 +186,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                         case SamplerMinFilter.Linear:
                             return MinFilter.LinearMipmapNearest;
                     }
+
                     break;
 
                 case SamplerMipFilter.Linear:
@@ -186,6 +197,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                         case SamplerMinFilter.Linear:
                             return MinFilter.LinearMipmapLinear;
                     }
+
                     break;
             }
 

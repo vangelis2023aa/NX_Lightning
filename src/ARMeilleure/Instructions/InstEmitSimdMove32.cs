@@ -13,17 +13,17 @@ namespace ARMeilleure.Instructions
     {
         #region "Masks"
         // Same as InstEmitSimdMove, as the instructions do the same thing.
-        private static readonly long[] _masksE0_Uzp = new long[]
-        {
+        private static readonly long[] _masksE0_Uzp =
+        [
             13L << 56 | 09L << 48 | 05L << 40 | 01L << 32 | 12L << 24 | 08L << 16 | 04L << 8 | 00L << 0,
-            11L << 56 | 10L << 48 | 03L << 40 | 02L << 32 | 09L << 24 | 08L << 16 | 01L << 8 | 00L << 0,
-        };
+            11L << 56 | 10L << 48 | 03L << 40 | 02L << 32 | 09L << 24 | 08L << 16 | 01L << 8 | 00L << 0
+        ];
 
-        private static readonly long[] _masksE1_Uzp = new long[]
-        {
+        private static readonly long[] _masksE1_Uzp =
+        [
             15L << 56 | 11L << 48 | 07L << 40 | 03L << 32 | 14L << 24 | 10L << 16 | 06L << 8 | 02L << 0,
-            15L << 56 | 14L << 48 | 07L << 40 | 06L << 32 | 13L << 24 | 12L << 16 | 05L << 8 | 04L << 0,
-        };
+            15L << 56 | 14L << 48 | 07L << 40 | 06L << 32 | 13L << 24 | 12L << 16 | 05L << 8 | 04L << 0
+        ];
         #endregion
 
         public static void Vmov_I(ArmEmitterContext context)
@@ -189,6 +189,26 @@ namespace ARMeilleure.Instructions
             }
 
             context.Copy(GetVecA32(op.Qd), res);
+        }
+
+        public static void Vswp(ArmEmitterContext context)
+        {
+            OpCode32Simd op = (OpCode32Simd)context.CurrOp;
+
+            if (op.Q)
+            {
+                Operand temp = context.Copy(GetVecA32(op.Qd));
+
+                context.Copy(GetVecA32(op.Qd), GetVecA32(op.Qm));
+                context.Copy(GetVecA32(op.Qm), temp);
+            }
+            else
+            {
+                Operand temp = ExtractScalar(context, OperandType.I64, op.Vd);
+
+                InsertScalar(context, op.Vd, ExtractScalar(context, OperandType.I64, op.Vm));
+                InsertScalar(context, op.Vm, temp);
+            }
         }
 
         public static void Vtbl(ArmEmitterContext context)

@@ -10,7 +10,8 @@ using static Ryujinx.Audio.Integration.IHardwareDeviceDriver;
 
 namespace Ryujinx.Audio.Backends.OpenAL
 {
-    public class OpenALHardwareDeviceDriver : IHardwareDeviceDriver
+    // ReSharper disable once InconsistentNaming
+    public sealed class OpenALHardwareDeviceDriver : IHardwareDeviceDriver
     {
         private readonly ALDevice _device;
         private readonly ALContext _context;
@@ -20,9 +21,28 @@ namespace Ryujinx.Audio.Backends.OpenAL
         private bool _stillRunning;
         private readonly Thread _updaterThread;
 
+        private float _volume;
+
+        public float Volume
+        {
+            get
+            {
+                return _volume;
+            }
+            set
+            {
+                _volume = value;
+
+                foreach (OpenALHardwareDeviceSession session in _sessions.Keys)
+                {
+                    session.UpdateMasterVolume(value);
+                }
+            }
+        }
+
         public OpenALHardwareDeviceDriver()
         {
-            _device = ALC.OpenDevice("");
+            _device = ALC.OpenDevice(string.Empty);
             _context = ALC.CreateContext(_device, new ALContextAttributes());
             _updateRequiredEvent = new ManualResetEvent(false);
             _pauseEvent = new ManualResetEvent(true);
@@ -33,6 +53,8 @@ namespace Ryujinx.Audio.Backends.OpenAL
             {
                 Name = "HardwareDeviceDriver.OpenAL",
             };
+
+            _volume = 1f;
 
             _updaterThread.Start();
         }
@@ -52,7 +74,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
             }
         }
 
-        public IHardwareDeviceSession OpenDeviceSession(Direction direction, IVirtualMemoryManager memoryManager, SampleFormat sampleFormat, uint sampleRate, uint channelCount, float volume)
+        public IHardwareDeviceSession OpenDeviceSession(Direction direction, IVirtualMemoryManager memoryManager, SampleFormat sampleFormat, uint sampleRate, uint channelCount)
         {
             if (channelCount == 0)
             {
@@ -73,7 +95,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
                 throw new ArgumentException($"{channelCount}");
             }
 
-            OpenALHardwareDeviceSession session = new(this, memoryManager, sampleFormat, sampleRate, channelCount, volume);
+            OpenALHardwareDeviceSession session = new(this, memoryManager, sampleFormat, sampleRate, channelCount);
 
             _sessions.TryAdd(session, 0);
 
@@ -127,7 +149,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
             Dispose(true);
         }
 
-        protected virtual void Dispose(bool disposing)
+        private void Dispose(bool disposing)
         {
             if (disposing)
             {
@@ -157,7 +179,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
 
         public bool SupportsChannelCount(uint channelCount)
         {
-            return channelCount == 1 || channelCount == 2 || channelCount == 6;
+            return channelCount is 1 or 2 or 6;
         }
 
         public bool SupportsDirection(Direction direction)

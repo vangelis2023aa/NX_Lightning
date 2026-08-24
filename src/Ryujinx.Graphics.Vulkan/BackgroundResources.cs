@@ -25,11 +25,18 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 bool useBackground = _gd.BackgroundQueue.Handle != 0 && _gd.Vendor != Vendor.Amd;
                 Queue queue = useBackground ? _gd.BackgroundQueue : _gd.Queue;
-                object queueLock = useBackground ? _gd.BackgroundQueueLock : _gd.QueueLock;
+                Lock queueLock = useBackground ? _gd.BackgroundQueueLock : _gd.QueueLock;
 
                 lock (queueLock)
                 {
-                    _pool = new CommandBufferPool(_gd.Api, _device, queue, queueLock, _gd.QueueFamilyIndex, isLight: true);
+                    _pool = new CommandBufferPool(
+                        _gd.Api,
+                        _device,
+                        queue,
+                        queueLock,
+                        _gd.QueueFamilyIndex,
+                        _gd.IsQualcommProprietary,
+                        isLight: true);
                 }
             }
 
@@ -103,7 +110,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             lock (_resources)
             {
-                foreach (var resource in _resources.Values)
+                foreach (BackgroundResource resource in _resources.Values)
                 {
                     resource.Dispose();
                 }

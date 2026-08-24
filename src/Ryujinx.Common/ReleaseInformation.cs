@@ -1,4 +1,3 @@
-using Ryujinx.Common.Configuration;
 using System;
 using System.Reflection;
 
@@ -7,57 +6,32 @@ namespace Ryujinx.Common
     // DO NOT EDIT, filled by CI
     public static class ReleaseInformation
     {
-        private const string FlatHubChannelOwner = "flathub";
+        private const string CanaryChannel = "canary";
+        private const string ReleaseChannel = "release";
 
-        public const string BuildVersion = "%%RYUJINX_BUILD_VERSION%%";
-        public const string BuildGitHash = "%%RYUJINX_BUILD_GIT_HASH%%";
-        public const string ReleaseChannelName = "%%RYUJINX_TARGET_RELEASE_CHANNEL_NAME%%";
-        public const string ReleaseChannelOwner = "%%RYUJINX_TARGET_RELEASE_CHANNEL_OWNER%%";
-        public const string ReleaseChannelRepo = "%%RYUJINX_TARGET_RELEASE_CHANNEL_REPO%%";
+        private const string BuildVersion = "%%RYUJINX_BUILD_VERSION%%";
+        private const string BuildGitHash = "%%RYUJINX_BUILD_GIT_HASH%%";
+        private const string ReleaseChannelName = "%%RYUJINX_TARGET_RELEASE_CHANNEL_NAME%%";
+        private const string ConfigFileName = "%%RYUJINX_CONFIG_FILE_NAME%%";
 
-        public static bool IsValid()
-        {
-            return !BuildGitHash.StartsWith("%%") &&
-                   !ReleaseChannelName.StartsWith("%%") &&
-                   !ReleaseChannelOwner.StartsWith("%%") &&
-                   !ReleaseChannelRepo.StartsWith("%%");
-        }
+        public static string ConfigName => !ConfigFileName.StartsWith("%%") ? ConfigFileName : "Config.json";
 
-        public static bool IsFlatHubBuild()
-        {
-            return IsValid() && ReleaseChannelOwner.Equals(FlatHubChannelOwner);
-        }
+        public static bool IsValid =>
+            !BuildGitHash.StartsWith("%%") &&
+            !ReleaseChannelName.StartsWith("%%") &&
+            !ConfigFileName.StartsWith("%%");
 
-        public static string GetVersion()
-        {
-            if (OperatingSystem.IsIOS())
-            {
-                return "ios";
-            }
+        public static bool IsCanaryBuild => IsValid && ReleaseChannelName.Equals(CanaryChannel);
 
-            if (IsValid())
-            {
-                return BuildVersion;
-            }
+        public static bool IsReleaseBuild => IsValid && ReleaseChannelName.Equals(ReleaseChannel);
 
-            return Assembly.GetEntryAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>().InformationalVersion;
-        }
+        public static string Version => IsValid ? BuildVersion : Assembly.GetEntryAssembly()!.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
-#if FORCE_EXTERNAL_BASE_DIR
-        public static string GetBaseApplicationDirectory()
-        {
-            return AppDataManager.BaseDirPath;
-        }
-#else
-        public static string GetBaseApplicationDirectory()
-        {
-            if (IsFlatHubBuild() || OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
-            {
-                return AppDataManager.BaseDirPath;
-            }
-
-            return AppDomain.CurrentDomain.BaseDirectory;
-        }
-#endif
+        public static string GetChangelogUrl(Version currentVersion, Version newVersion) =>
+            IsCanaryBuild
+                ? $"https://git.ryujinx.app/projects/Ryubing/compare/Canary-{currentVersion}...Canary-{newVersion}"
+                : $"https://git.ryujinx.app/projects/Ryubing/releases/tag/{newVersion}";
     }
+
+
 }

@@ -1,3 +1,4 @@
+using Ryujinx.Common.Configuration;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Vulkan.Effects;
 using Silk.NET.Vulkan;
@@ -20,7 +21,7 @@ namespace Ryujinx.Graphics.Vulkan
         private SwapchainKHR _swapchain;
 
         private Image[] _swapchainImages;
-        private Auto<DisposableImageView>[] _swapchainImageViews;
+        private TextureView[] _swapchainImageViews;
 
         private Semaphore[] _imageAvailableSemaphores;
         private Semaphore[] _renderFinishedSemaphores;
@@ -29,7 +30,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private int _width;
         private int _height;
-        private bool _vsyncEnabled;
+        private VSyncMode _vSyncMode;
         private bool _swapchainIsDirty;
         private VkFormat _format;
         private AntiAliasing _currentAntiAliasing;
@@ -54,7 +55,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void RecreateSwapchain()
         {
-            var oldSwapchain = _swapchain;
+            SwapchainKHR oldSwapchain = _swapchain;
             _swapchainIsDirty = false;
 
             for (int i = 0; i < _swapchainImageViews.Length; i++)
@@ -86,13 +87,13 @@ namespace Ryujinx.Graphics.Vulkan
 
         private unsafe void CreateSwapchain()
         {
-            _gd.SurfaceApi.GetPhysicalDeviceSurfaceCapabilities(_physicalDevice, _surface, out var capabilities);
+            _gd.SurfaceApi.GetPhysicalDeviceSurfaceCapabilities(_physicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities);
 
             uint surfaceFormatsCount;
 
             _gd.SurfaceApi.GetPhysicalDeviceSurfaceFormats(_physicalDevice, _surface, &surfaceFormatsCount, null);
 
-            var surfaceFormats = new SurfaceFormatKHR[surfaceFormatsCount];
+            SurfaceFormatKHR[] surfaceFormats = new SurfaceFormatKHR[surfaceFormatsCount];
 
             fixed (SurfaceFormatKHR* pSurfaceFormats = surfaceFormats)
             {
@@ -103,7 +104,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             _gd.SurfaceApi.GetPhysicalDeviceSurfacePresentModes(_physicalDevice, _surface, &presentModesCount, null);
 
-            var presentModes = new PresentModeKHR[presentModesCount];
+            PresentModeKHR[] presentModes = new PresentModeKHR[presentModesCount];
 
             fixed (PresentModeKHR* pPresentModes = presentModes)
             {
@@ -116,17 +117,17 @@ namespace Ryujinx.Graphics.Vulkan
                 imageCount = capabilities.MaxImageCount;
             }
 
-            var surfaceFormat = ChooseSwapSurfaceFormat(surfaceFormats, _colorSpacePassthroughEnabled);
+            SurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(surfaceFormats, _colorSpacePassthroughEnabled);
 
-            var extent = ChooseSwapExtent(capabilities);
+            Extent2D extent = ChooseSwapExtent(capabilities);
 
             _width = (int)extent.Width;
             _height = (int)extent.Height;
             _format = surfaceFormat.Format;
 
-            var oldSwapchain = _swapchain;
+            SwapchainKHR oldSwapchain = _swapchain;
 
-            var swapchainCreateInfo = new SwapchainCreateInfoKHR
+            SwapchainCreateInfoKHR swapchainCreateInfo = new()
             {
                 SType = StructureType.SwapchainCreateInfoKhr,
                 Surface = _surface,
@@ -139,11 +140,28 @@ namespace Ryujinx.Graphics.Vulkan
                 ImageArrayLayers = 1,
                 PreTransform = capabilities.CurrentTransform,
                 CompositeAlpha = ChooseCompositeAlpha(capabilities.SupportedCompositeAlpha),
-                PresentMode = ChooseSwapPresentMode(presentModes, _vsyncEnabled),
+                PresentMode = ChooseSwapPresentMode(presentModes, _vSyncMode),
                 Clipped = true,
             };
 
-            _gd.SwapchainApi.CreateSwapchain(_device, swapchainCreateInfo, null, out _swapchain).ThrowOnError();
+            TextureCreateInfo textureCreateInfo = new(
+                _width,
+                _height,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                FormatTable.GetFormat(surfaceFormat.Format),
+                DepthStencilMode.Depth,
+                Target.Texture2D,
+                SwizzleComponent.Red,
+                SwizzleComponent.Green,
+                SwizzleComponent.Blue,
+                SwizzleComponent.Alpha);
+
+            _gd.SwapchainApi.CreateSwapchain(_device, in swapchainCreateInfo, null, out _swapchain).ThrowOnError();
 
             _gd.SwapchainApi.GetSwapchainImages(_device, _swapchain, &imageCount, null);
 
@@ -154,14 +172,14 @@ namespace Ryujinx.Graphics.Vulkan
                 _gd.SwapchainApi.GetSwapchainImages(_device, _swapchain, &imageCount, pSwapchainImages);
             }
 
-            _swapchainImageViews = new Auto<DisposableImageView>[imageCount];
+            _swapchainImageViews = new TextureView[imageCount];
 
             for (int i = 0; i < _swapchainImageViews.Length; i++)
             {
-                _swapchainImageViews[i] = CreateSwapchainImageView(_swapchainImages[i], surfaceFormat.Format);
+                _swapchainImageViews[i] = CreateSwapchainImageView(_swapchainImages[i], surfaceFormat.Format, textureCreateInfo);
             }
 
-            var semaphoreCreateInfo = new SemaphoreCreateInfo
+            SemaphoreCreateInfo semaphoreCreateInfo = new()
             {
                 SType = StructureType.SemaphoreCreateInfo,
             };
@@ -170,30 +188,30 @@ namespace Ryujinx.Graphics.Vulkan
 
             for (int i = 0; i < _imageAvailableSemaphores.Length; i++)
             {
-                _gd.Api.CreateSemaphore(_device, semaphoreCreateInfo, null, out _imageAvailableSemaphores[i]).ThrowOnError();
+                _gd.Api.CreateSemaphore(_device, in semaphoreCreateInfo, null, out _imageAvailableSemaphores[i]).ThrowOnError();
             }
 
             _renderFinishedSemaphores = new Semaphore[imageCount];
 
             for (int i = 0; i < _renderFinishedSemaphores.Length; i++)
             {
-                _gd.Api.CreateSemaphore(_device, semaphoreCreateInfo, null, out _renderFinishedSemaphores[i]).ThrowOnError();
+                _gd.Api.CreateSemaphore(_device, in semaphoreCreateInfo, null, out _renderFinishedSemaphores[i]).ThrowOnError();
             }
         }
 
-        private unsafe Auto<DisposableImageView> CreateSwapchainImageView(Image swapchainImage, VkFormat format)
+        private unsafe TextureView CreateSwapchainImageView(Image swapchainImage, VkFormat format, TextureCreateInfo info)
         {
-            var componentMapping = new ComponentMapping(
+            ComponentMapping componentMapping = new(
                 ComponentSwizzle.R,
                 ComponentSwizzle.G,
                 ComponentSwizzle.B,
                 ComponentSwizzle.A);
 
-            var aspectFlags = ImageAspectFlags.ColorBit;
+            ImageAspectFlags aspectFlags = ImageAspectFlags.ColorBit;
 
-            var subresourceRange = new ImageSubresourceRange(aspectFlags, 0, 1, 0, 1);
+            ImageSubresourceRange subresourceRange = new(aspectFlags, 0, 1, 0, 1);
 
-            var imageCreateInfo = new ImageViewCreateInfo
+            ImageViewCreateInfo imageCreateInfo = new()
             {
                 SType = StructureType.ImageViewCreateInfo,
                 Image = swapchainImage,
@@ -203,8 +221,9 @@ namespace Ryujinx.Graphics.Vulkan
                 SubresourceRange = subresourceRange,
             };
 
-            _gd.Api.CreateImageView(_device, imageCreateInfo, null, out var imageView).ThrowOnError();
-            return new Auto<DisposableImageView>(new DisposableImageView(_gd.Api, _device, imageView));
+            _gd.Api.CreateImageView(_device, in imageCreateInfo, null, out ImageView imageView).ThrowOnError();
+
+            return new TextureView(_gd, _device, new DisposableImageView(_gd.Api, _device, imageView), info, format);
         }
 
         private static SurfaceFormatKHR ChooseSwapSurfaceFormat(SurfaceFormatKHR[] availableFormats, bool colorSpacePassthroughEnabled)
@@ -214,10 +233,10 @@ namespace Ryujinx.Graphics.Vulkan
                 return new SurfaceFormatKHR(VkFormat.B8G8R8A8Unorm, ColorSpaceKHR.PaceSrgbNonlinearKhr);
             }
 
-            var formatToReturn = availableFormats[0];
+            SurfaceFormatKHR formatToReturn = availableFormats[0];
             if (colorSpacePassthroughEnabled)
             {
-                foreach (var format in availableFormats)
+                foreach (SurfaceFormatKHR format in availableFormats)
                 {
                     if (format.Format == VkFormat.B8G8R8A8Unorm && format.ColorSpace == ColorSpaceKHR.SpacePassThroughExt)
                     {
@@ -232,7 +251,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
             else
             {
-                foreach (var format in availableFormats)
+                foreach (SurfaceFormatKHR format in availableFormats)
                 {
                     if (format.Format == VkFormat.B8G8R8A8Unorm && format.ColorSpace == ColorSpaceKHR.PaceSrgbNonlinearKhr)
                     {
@@ -261,9 +280,9 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        private static PresentModeKHR ChooseSwapPresentMode(PresentModeKHR[] availablePresentModes, bool vsyncEnabled)
+        private static PresentModeKHR ChooseSwapPresentMode(PresentModeKHR[] availablePresentModes, VSyncMode vSyncMode)
         {
-            if (!vsyncEnabled && availablePresentModes.Contains(PresentModeKHR.ImmediateKhr))
+            if (vSyncMode == VSyncMode.Unbounded && availablePresentModes.Contains(PresentModeKHR.ImmediateKhr))
             {
                 return PresentModeKHR.ImmediateKhr;
             }
@@ -299,7 +318,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             while (true)
             {
-                var acquireResult = _gd.SwapchainApi.AcquireNextImage(
+                Result acquireResult = _gd.SwapchainApi.AcquireNextImage(
                     _device,
                     _swapchain,
                     ulong.MaxValue,
@@ -312,6 +331,7 @@ namespace Ryujinx.Graphics.Vulkan
                     _swapchainIsDirty)
                 {
                     RecreateSwapchain();
+                    semaphoreIndex = (_frameIndex - 1) % _imageAvailableSemaphores.Length;
                 }
                 else
                 {
@@ -320,11 +340,11 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            var swapchainImage = _swapchainImages[nextImage];
+            Image swapchainImage = _swapchainImages[nextImage];
 
             _gd.FlushAllCommands();
 
-            var cbs = _gd.CommandBufferPool.Rent();
+            CommandBufferScoped cbs = _gd.CommandBufferPool.Rent();
 
             Transition(
                 cbs.CommandBuffer,
@@ -334,7 +354,7 @@ namespace Ryujinx.Graphics.Vulkan
                 ImageLayout.Undefined,
                 ImageLayout.General);
 
-            var view = (TextureView)texture;
+            TextureView view = (TextureView)texture;
 
             UpdateEffect();
 
@@ -374,14 +394,14 @@ namespace Ryujinx.Graphics.Vulkan
                     _gd.CommandBufferPool.Return(
                         cbs,
                         null,
-                        stackalloc[] { PipelineStageFlags.ColorAttachmentOutputBit },
+                        [PipelineStageFlags.ColorAttachmentOutputBit],
                         null);
                     _gd.FlushAllCommands();
                     cbs.GetFence().Wait();
                     cbs = _gd.CommandBufferPool.Rent();
                 }
 
-                CaptureFrame(view, srcX0, srcY0, srcX1 - srcX0, srcY1 - srcY0, view.Info.Format.IsBgr(), crop.FlipX, crop.FlipY);
+                CaptureFrame(view, srcX0, srcY0, srcX1 - srcX0, srcY1 - srcY0, view.Info.Format.IsBgr, crop.FlipX, crop.FlipY);
 
                 ScreenCaptureRequested = false;
             }
@@ -406,13 +426,24 @@ namespace Ryujinx.Graphics.Vulkan
                 _scalingFilter.Run(
                     view,
                     cbs,
-                    _swapchainImageViews[nextImage],
+                    _swapchainImageViews[nextImage].GetImageViewForAttachment(),
                     _format,
                     _width,
                     _height,
                     new Extents2D(srcX0, srcY0, srcX1, srcY1),
                     new Extents2D(dstX0, dstY0, dstX1, dstY1)
                     );
+            }
+            else if (!view.Info.Target.IsMultisample)
+            {
+                _gd.HelperShader.PresentCopy(
+                    _gd,
+                    cbs,
+                    view,
+                    _swapchainImageViews[nextImage].GetImageViewForAttachment(),
+                    new Extents2D(srcX0, srcY0, srcX1, srcY1),
+                    new Extents2D(dstX0, dstY1, dstX1, dstY0),
+                    _isLinear);
             }
             else
             {
@@ -421,11 +452,6 @@ namespace Ryujinx.Graphics.Vulkan
                     cbs,
                     view,
                     _swapchainImageViews[nextImage],
-                    _width,
-                    _height,
-                    1,
-                    _format,
-                    false,
                     new Extents2D(srcX0, srcY0, srcX1, srcY1),
                     new Extents2D(dstX0, dstY1, dstX1, dstY0),
                     _isLinear,
@@ -442,17 +468,17 @@ namespace Ryujinx.Graphics.Vulkan
 
             _gd.CommandBufferPool.Return(
                 cbs,
-                stackalloc[] { _imageAvailableSemaphores[semaphoreIndex] },
-                stackalloc[] { PipelineStageFlags.ColorAttachmentOutputBit },
-                stackalloc[] { _renderFinishedSemaphores[semaphoreIndex] });
+                [_imageAvailableSemaphores[semaphoreIndex]],
+                [PipelineStageFlags.ColorAttachmentOutputBit],
+                [_renderFinishedSemaphores[semaphoreIndex]]);
 
             // TODO: Present queue.
-            var semaphore = _renderFinishedSemaphores[semaphoreIndex];
-            var swapchain = _swapchain;
+            Semaphore semaphore = _renderFinishedSemaphores[semaphoreIndex];
+            SwapchainKHR swapchain = _swapchain;
 
             Result result;
 
-            var presentInfo = new PresentInfoKHR
+            PresentInfoKHR presentInfo = new()
             {
                 SType = StructureType.PresentInfoKhr,
                 WaitSemaphoreCount = 1,
@@ -465,7 +491,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             lock (_gd.QueueLock)
             {
-                _gd.SwapchainApi.QueuePresent(_gd.Queue, presentInfo);
+                _gd.SwapchainApi.QueuePresent(_gd.Queue, in presentInfo);
             }
         }
 
@@ -519,7 +545,7 @@ namespace Ryujinx.Graphics.Vulkan
                     case AntiAliasing.SmaaMedium:
                     case AntiAliasing.SmaaHigh:
                     case AntiAliasing.SmaaUltra:
-                        var quality = _currentAntiAliasing - AntiAliasing.SmaaLow;
+                        int quality = _currentAntiAliasing - AntiAliasing.SmaaLow;
                         if (_effect is SmaaPostProcessingEffect smaa)
                         {
                             smaa.Quality = quality;
@@ -529,6 +555,7 @@ namespace Ryujinx.Graphics.Vulkan
                             _effect?.Dispose();
                             _effect = new SmaaPostProcessingEffect(_gd, _device, quality);
                         }
+
                         break;
                 }
             }
@@ -554,6 +581,14 @@ namespace Ryujinx.Graphics.Vulkan
 
                         _scalingFilter.Level = _scalingFilterLevel;
                         break;
+                    case ScalingFilter.Area:
+                        if (_scalingFilter is not AreaScalingFilter)
+                        {
+                            _scalingFilter?.Dispose();
+                            _scalingFilter = new AreaScalingFilter(_gd, _device);
+                        }
+
+                        break;
                 }
             }
         }
@@ -572,9 +607,9 @@ namespace Ryujinx.Graphics.Vulkan
             ImageLayout srcLayout,
             ImageLayout dstLayout)
         {
-            var subresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1);
+            ImageSubresourceRange subresourceRange = new(ImageAspectFlags.ColorBit, 0, 1, 0, 1);
 
-            var barrier = new ImageMemoryBarrier
+            ImageMemoryBarrier barrier = new()
             {
                 SType = StructureType.ImageMemoryBarrier,
                 SrcAccessMask = srcAccess,
@@ -597,7 +632,7 @@ namespace Ryujinx.Graphics.Vulkan
                 0,
                 null,
                 1,
-                barrier);
+                in barrier);
         }
 
         private void CaptureFrame(TextureView texture, int x, int y, int width, int height, bool isBgra, bool flipX, bool flipY)
@@ -609,12 +644,14 @@ namespace Ryujinx.Graphics.Vulkan
 
         public override void SetSize(int width, int height)
         {
-            // Not needed as we can get the size from the surface.
+            // We don't need to use width and height as we can get the size from the surface.
+            _swapchainIsDirty = true;
         }
 
-        public override void ChangeVSyncMode(bool vsyncEnabled)
+        public override void ChangeVSyncMode(VSyncMode vSyncMode)
         {
-            _vsyncEnabled = vsyncEnabled;
+            _vSyncMode = vSyncMode;
+            //present mode may change, so mark the swapchain for recreation
             _swapchainIsDirty = true;
         }
 

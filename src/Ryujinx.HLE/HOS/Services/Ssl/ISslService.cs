@@ -9,14 +9,15 @@ using System.Runtime.InteropServices;
 namespace Ryujinx.HLE.HOS.Services.Ssl
 {
     [Service("ssl")]
-    class ISslService : IpcService
+    [Service("ssl:s")]
+    partial class ISslService : IpcService
     {
         // NOTE: The SSL service is used by games to connect it to various official online services, which we do not intend to support.
         //       In this case it is acceptable to stub all calls of the service.
         public ISslService(ServiceCtx context) { }
 
         [CommandCmif(0)]
-        // CreateContext(nn::ssl::sf::SslVersion, u64, pid) -> object<nn::ssl::sf::ISslContext>
+        // CreateContext(nn::ssl::sf::SslVersion, u64 pid_placeholder, pid) -> object<nn::ssl::sf::ISslContext>
         public ResultCode CreateContext(ServiceCtx context)
         {
             SslVersion sslVersion = (SslVersion)context.RequestData.ReadUInt32();
@@ -120,6 +121,53 @@ namespace Ryujinx.HLE.HOS.Services.Ssl
             uint interfaceVersion = context.RequestData.ReadUInt32();
 
             Logger.Stub?.PrintStub(LogClass.ServiceSsl, new { interfaceVersion });
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(100)]
+        // CreateContextForSystem(nn::ssl::sf::SslVersion, u64 pid_placeholder, pid) -> object<nn::ssl::sf::ISslContextForSystem>
+        public ResultCode CreateContextForSystem(ServiceCtx context)
+        {
+            SslVersion sslVersion = (SslVersion)context.RequestData.ReadUInt32();
+#pragma warning disable IDE0059 // Remove unnecessary value assignment
+            ulong pidPlaceholder = context.RequestData.ReadUInt64();
+#pragma warning restore IDE0059
+
+            // Note: We use ISslContext here instead of ISslContextForSystem class because Ryujinx implements both in one class.
+            MakeObject(context, new ISslContext(context.Request.HandleDesc.PId, sslVersion));
+
+            Logger.Stub?.PrintStub(LogClass.ServiceSsl, new { sslVersion });
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(101)]
+        // SetThreadCoreMask(u64 mask)
+        public ResultCode SetThreadCoreMask(ServiceCtx context)
+        {
+            ulong mask = context.RequestData.ReadUInt64();
+
+            Logger.Stub?.PrintStub(LogClass.ServiceSsl, new { mask });
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(102)]
+        // GetThreadCoreMask() -> u64
+        public ResultCode GetThreadCoreMask(ServiceCtx context)
+        {
+            Logger.Stub?.PrintStub(LogClass.ServiceSsl);
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(103)]
+        // VerifySignature(buffer<0x5> unknownInput1, buffer<0x5> unknownInput2, buffer<0x5> unknownInput3, buffer<bytes, 4> unknown1)
+        public ResultCode VerifySignature(ServiceCtx context)
+        {
+            // I would log these values like a proper stub, but I genuinely don't know how.
+            Logger.Stub?.PrintStub(LogClass.ServiceSsl);
 
             return ResultCode.Success;
         }

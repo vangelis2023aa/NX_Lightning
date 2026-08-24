@@ -28,7 +28,7 @@ namespace Ryujinx.Audio.Renderer.Server.Sink
         /// The upsampler instance used by this sink.
         /// </summary>
         /// <remarks>Null if no upsampling is needed.</remarks>
-        public UpsamplerState UpsamplerState;
+        public UpsamplerInfo UpsamplerInfo;
 
         /// <summary>
         /// Create a new <see cref="DeviceSink"/>.
@@ -40,24 +40,24 @@ namespace Ryujinx.Audio.Renderer.Server.Sink
 
         public override void CleanUp()
         {
-            UpsamplerState?.Release();
+            UpsamplerInfo?.Release();
 
-            UpsamplerState = null;
+            UpsamplerInfo = null;
 
             base.CleanUp();
         }
 
         public override SinkType TargetSinkType => SinkType.Device;
 
-        public override void Update(out BehaviourParameter.ErrorInfo errorInfo, ref SinkInParameter parameter, ref SinkOutStatus outStatus, PoolMapper mapper)
+        public override void Update(out BehaviourParameter.ErrorInfo errorInfo, in SinkInParameter parameter, ref SinkOutStatus outStatus, PoolMapper mapper)
         {
-            Debug.Assert(IsTypeValid(ref parameter));
+            Debug.Assert(IsTypeValid(in parameter));
 
             ref DeviceParameter inputDeviceParameter = ref MemoryMarshal.Cast<byte, DeviceParameter>(parameter.SpecificData)[0];
 
             if (parameter.IsUsed != IsUsed)
             {
-                UpdateStandardParameter(ref parameter);
+                UpdateStandardParameter(in parameter);
                 Parameter = inputDeviceParameter;
             }
             else

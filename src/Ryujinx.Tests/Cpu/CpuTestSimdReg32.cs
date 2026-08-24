@@ -15,134 +15,136 @@ namespace Ryujinx.Tests.Cpu
         #region "ValueSource (Opcodes)"
         private static uint[] _V_Add_Sub_Long_Wide_I_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf2800000u, // VADDL.S8 Q0, D0, D0
                 0xf2800100u, // VADDW.S8 Q0, Q0, D0
                 0xf2800200u, // VSUBL.S8 Q0, D0, D0
-                0xf2800300u, // VSUBW.S8 Q0, Q0, D0
-            };
+                0xf2800300u // VSUBW.S8 Q0, Q0, D0
+            ];
         }
 
         private static uint[] _Vfma_Vfms_Vfnma_Vfnms_S_F32_()
         {
-            return new[]
-            {
+            return
+            [
                 0xEEA00A00u, // VFMA. F32 S0, S0, S0
                 0xEEA00A40u, // VFMS. F32 S0, S0, S0
                 0xEE900A40u, // VFNMA.F32 S0, S0, S0
-                0xEE900A00u, // VFNMS.F32 S0, S0, S0
-            };
+                0xEE900A00u // VFNMS.F32 S0, S0, S0
+            ];
         }
 
         private static uint[] _Vfma_Vfms_Vfnma_Vfnms_S_F64_()
         {
-            return new[]
-            {
+            return
+            [
                 0xEEA00B00u, // VFMA. F64 D0, D0, D0
                 0xEEA00B40u, // VFMS. F64 D0, D0, D0
                 0xEE900B40u, // VFNMA.F64 D0, D0, D0
-                0xEE900B00u, // VFNMS.F64 D0, D0, D0
-            };
+                0xEE900B00u // VFNMS.F64 D0, D0, D0
+            ];
         }
 
         private static uint[] _Vfma_Vfms_V_F32_()
         {
-            return new[]
-            {
+            return
+            [
                 0xF2000C10u, // VFMA.F32 D0, D0, D0
-                0xF2200C10u, // VFMS.F32 D0, D0, D0
-            };
+                0xF2200C10u // VFMS.F32 D0, D0, D0
+            ];
         }
 
         private static uint[] _Vmla_Vmls_Vnmla_Vnmls_S_F32_()
         {
-            return new[]
-            {
+            return
+            [
                 0xEE000A00u, // VMLA. F32 S0, S0, S0
                 0xEE000A40u, // VMLS. F32 S0, S0, S0
                 0xEE100A40u, // VNMLA.F32 S0, S0, S0
-                0xEE100A00u, // VNMLS.F32 S0, S0, S0
-            };
+                0xEE100A00u // VNMLS.F32 S0, S0, S0
+            ];
         }
 
         private static uint[] _Vmla_Vmls_Vnmla_Vnmls_S_F64_()
         {
-            return new[]
-            {
+            return
+            [
                 0xEE000B00u, // VMLA. F64 D0, D0, D0
                 0xEE000B40u, // VMLS. F64 D0, D0, D0
                 0xEE100B40u, // VNMLA.F64 D0, D0, D0
-                0xEE100B00u, // VNMLS.F64 D0, D0, D0
-            };
+                0xEE100B00u // VNMLS.F64 D0, D0, D0
+            ];
         }
 
         private static uint[] _Vmlal_Vmlsl_V_I_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf2800800u, // VMLAL.S8 Q0, D0, D0
-                0xf2800a00u, // VMLSL.S8 Q0, D0, D0
-            };
+                0xf2800a00u // VMLSL.S8 Q0, D0, D0
+            ];
         }
 
         private static uint[] _Vp_Add_Max_Min_F_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf3000d00u, // VPADD.F32 D0, D0, D0
                 0xf3000f00u, // VPMAX.F32 D0, D0, D0
-                0xf3200f00u, // VPMIN.F32 D0, D0, D0
-            };
+                0xf3200f00u // VPMIN.F32 D0, D0, D0
+            ];
         }
 
         private static uint[] _Vp_Add_I_()
         {
-            return new[]
-            {
-                0xf2000b10u, // VPADD.I8 D0, D0, D0
-            };
+            return
+            [
+                0xf2000b10u // VPADD.I8 D0, D0, D0
+            ];
         }
 
         private static uint[] _V_Pmax_Pmin_Rhadd_I_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf2000a00u, // VPMAX .S8 D0, D0, D0
                 0xf2000a10u, // VPMIN .S8 D0, D0, D0
-                0xf2000100u, // VRHADD.S8 D0, D0, D0
-            };
+                0xf2000100u // VRHADD.S8 D0, D0, D0
+            ];
         }
 
         private static uint[] _Vq_Add_Sub_I_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf2000050u, // VQADD.S8 Q0, Q0, Q0
-                0xf2000250u, // VQSUB.S8 Q0, Q0, Q0
-            };
+                0xf2000250u // VQSUB.S8 Q0, Q0, Q0
+            ];
         }
         #endregion
 
         #region "ValueSource (Types)"
         private static ulong[] _8B1D_()
         {
-            return new[] {
+            return
+            [
                 0x0000000000000000ul, 0x7F7F7F7F7F7F7F7Ful,
                 0x8080808080808080ul, 0x7FFFFFFFFFFFFFFFul,
-                0x8000000000000000ul, 0xFFFFFFFFFFFFFFFFul,
-            };
+                0x8000000000000000ul, 0xFFFFFFFFFFFFFFFFul
+            ];
         }
 
         private static ulong[] _8B4H2S1D_()
         {
-            return new[] {
+            return
+            [
                 0x0000000000000000ul, 0x7F7F7F7F7F7F7F7Ful,
                 0x8080808080808080ul, 0x7FFF7FFF7FFF7FFFul,
                 0x8000800080008000ul, 0x7FFFFFFF7FFFFFFFul,
                 0x8000000080000000ul, 0x7FFFFFFFFFFFFFFFul,
-                0x8000000000000000ul, 0xFFFFFFFFFFFFFFFFul,
-            };
+                0x8000000000000000ul, 0xFFFFFFFFFFFFFFFFul
+            ];
         }
 
         private static IEnumerable<ulong> _1S_F_()
@@ -903,6 +905,77 @@ namespace Ryujinx.Tests.Cpu
             V128 v0 = MakeVectorE0E1(z, ~z);
             V128 v1 = MakeVectorE0E1(a, ~a);
             V128 v2 = MakeVectorE0E1(b, ~b);
+
+            SingleOpcode(opcode, v0: v0, v1: v1, v2: v2);
+
+            CompareAgainstUnicorn();
+        }
+
+        [Test, Pairwise, Description("VQRDMULH.<S16, S32> <Qd>, <Qn>, <Qm>")]
+        public void Vqrdmulh_I([Range(0u, 5u)] uint rd,
+                               [Range(0u, 5u)] uint rn,
+                               [Range(0u, 5u)] uint rm,
+                               [ValueSource(nameof(_8B4H2S1D_))] ulong z,
+                               [ValueSource(nameof(_8B4H2S1D_))] ulong a,
+                               [ValueSource(nameof(_8B4H2S1D_))] ulong b,
+                               [Values(1u, 2u)] uint size) // <S16, S32>
+        {
+            rd >>= 1;
+            rd <<= 1;
+            rn >>= 1;
+            rn <<= 1;
+            rm >>= 1;
+            rm <<= 1;
+
+            uint opcode = 0xf3100b40u & ~(3u << 20); // VQRDMULH.S16 Q0, Q0, Q0
+
+            opcode |= ((rd & 0xf) << 12) | ((rd & 0x10) << 18);
+            opcode |= ((rn & 0xf) << 16) | ((rn & 0x10) << 3);
+            opcode |= ((rm & 0xf) << 0) | ((rm & 0x10) << 1);
+
+            opcode |= (size & 0x3) << 20;
+
+            V128 v0 = MakeVectorE0E1(z, ~z);
+            V128 v1 = MakeVectorE0E1(a, ~a);
+            V128 v2 = MakeVectorE0E1(b, ~b);
+
+            SingleOpcode(opcode, v0: v0, v1: v1, v2: v2);
+
+            CompareAgainstUnicorn();
+        }
+
+        [Test, Pairwise]
+        public void Vp_Add_Long_Accumulate([Values(0u, 2u, 4u, 8u)] uint rd,
+                                           [Values(0u, 2u, 4u, 8u)] uint rm,
+                                           [Values(0u, 1u, 2u)] uint size,
+                                           [Random(RndCnt)] ulong z,
+                                           [Random(RndCnt)] ulong a,
+                                           [Random(RndCnt)] ulong b,
+                                           [Values] bool q,
+                                           [Values] bool unsigned)
+        {
+            uint opcode = 0xF3B00600; // VPADAL.S8 D0, Q0
+
+            if (q)
+            {
+                opcode |= 1 << 6;
+                rm <<= 1;
+                rd <<= 1;
+            }
+
+            if (unsigned)
+            {
+                opcode |= 1 << 7;
+            }
+
+            opcode |= ((rm & 0xf) << 0) | ((rm & 0x10) << 1);
+            opcode |= ((rd & 0xf) << 12) | ((rd & 0x10) << 18);
+
+            opcode |= size << 18;
+
+            V128 v0 = MakeVectorE0E1(z, z);
+            V128 v1 = MakeVectorE0E1(a, z);
+            V128 v2 = MakeVectorE0E1(b, z);
 
             SingleOpcode(opcode, v0: v0, v1: v1, v2: v2);
 

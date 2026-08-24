@@ -406,7 +406,7 @@ namespace ARMeilleure.Instructions
                 {
                     Operand res = EmitSoftFloatCall(context, nameof(SoftFloat32.FPSub), op1, op2);
 
-                    return EmitUnaryMathCall(context, nameof(Math.Abs), res);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Abs), res);
                 });
             }
         }
@@ -451,7 +451,7 @@ namespace ARMeilleure.Instructions
                 {
                     Operand res = EmitSoftFloatCall(context, nameof(SoftFloat32.FPSub), op1, op2);
 
-                    return EmitUnaryMathCall(context, nameof(Math.Abs), res);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Abs), res);
                 });
             }
         }
@@ -483,7 +483,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitScalarUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Abs), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Abs), op1);
                 });
             }
         }
@@ -522,7 +522,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitVectorUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Abs), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Abs), op1);
                 });
             }
         }
@@ -2246,7 +2246,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitScalarUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Floor), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Floor), op1);
                 });
             }
         }
@@ -2265,7 +2265,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitVectorUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Floor), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Floor), op1);
                 });
             }
         }
@@ -2322,7 +2322,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitScalarUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Ceiling), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Ceiling), op1);
                 });
             }
         }
@@ -2341,7 +2341,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitVectorUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Ceiling), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Ceiling), op1);
                 });
             }
         }
@@ -2390,7 +2390,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitScalarUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Truncate), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Truncate), op1);
                 });
             }
         }
@@ -2409,7 +2409,7 @@ namespace ARMeilleure.Instructions
             {
                 EmitVectorUnaryOpF(context, (op1) =>
                 {
-                    return EmitUnaryMathCall(context, nameof(Math.Truncate), op1);
+                    return EmitUnaryMathCall(context, nameof(MathHelper.Truncate), op1);
                 });
             }
         }
@@ -2426,7 +2426,11 @@ namespace ARMeilleure.Instructions
             }
             else if (Optimizations.FastFP && Optimizations.UseSse41 && sizeF == 0)
             {
-                Operand res = EmitSse41Round32Exp8OpF(context, context.AddIntrinsic(Intrinsic.X86Rsqrtss, GetVec(op.Rn)), scalar: true);
+                // RSQRTSS handles subnormals as zero, which differs from Arm, so we can't use it here.
+
+                Operand res = context.AddIntrinsic(Intrinsic.X86Sqrtss, GetVec(op.Rn));
+                res = context.AddIntrinsic(Intrinsic.X86Rcpss, res);
+                res = EmitSse41Round32Exp8OpF(context, res, scalar: true);
 
                 context.Copy(GetVec(op.Rd), context.VectorZeroUpper96(res));
             }
@@ -2451,7 +2455,11 @@ namespace ARMeilleure.Instructions
             }
             else if (Optimizations.FastFP && Optimizations.UseSse41 && sizeF == 0)
             {
-                Operand res = EmitSse41Round32Exp8OpF(context, context.AddIntrinsic(Intrinsic.X86Rsqrtps, GetVec(op.Rn)), scalar: false);
+                // RSQRTPS handles subnormals as zero, which differs from Arm, so we can't use it here.
+
+                Operand res = context.AddIntrinsic(Intrinsic.X86Sqrtps, GetVec(op.Rn));
+                res = context.AddIntrinsic(Intrinsic.X86Rcpps, res);
+                res = EmitSse41Round32Exp8OpF(context, res, scalar: false);
 
                 if (op.RegisterSize == RegisterSize.Simd64)
                 {
@@ -5258,7 +5266,7 @@ namespace ARMeilleure.Instructions
         private static Operand EmitSse2Sll_128(ArmEmitterContext context, Operand op, int shift)
         {
             // The upper part of op is assumed to be zero.
-            Debug.Assert(shift >= 0 && shift < 64);
+            Debug.Assert(shift is >= 0 and < 64);
 
             if (shift == 0)
             {

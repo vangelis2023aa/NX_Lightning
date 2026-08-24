@@ -1,17 +1,21 @@
 using Silk.NET.Vulkan;
 using System;
-using System.Runtime.Serialization;
 
 namespace Ryujinx.Graphics.Vulkan
 {
     static class ResultExtensions
     {
-        public static void ThrowOnError(this Result result)
+        extension(Result result)
         {
-            // Only negative result codes are errors.
-            if ((int)result < (int)Result.Success)
+            public bool IsError => result < Result.Success;
+
+            public void ThrowOnError()
             {
-                throw new VulkanException(result);
+                // Only negative result codes are errors.
+                if (result.IsError)
+                {
+                    throw new VulkanException(result);
+                }
             }
         }
     }

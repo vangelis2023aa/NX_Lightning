@@ -14,13 +14,13 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
             Debug.Assert(funcId.Type == OperandType.Constant);
 
-            var function = context.GetFunction(funcId.Value);
+            StructuredFunction function = context.GetFunction(funcId.Value);
 
             string[] args = new string[operation.SourcesCount - 1];
 
             for (int i = 0; i < args.Length; i++)
             {
-                args[i] = GetSoureExpr(context, operation.GetSource(i + 1), function.GetArgumentType(i));
+                args[i] = GetSourceExpr(context, operation.GetSource(i + 1), function.GetArgumentType(i));
             }
 
             return $"{function.Name}({string.Join(", ", args)})";

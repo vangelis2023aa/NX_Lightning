@@ -1,9 +1,8 @@
-using Ryujinx.Common.Utilities;
 using System.Text.Json.Serialization;
 
 namespace Ryujinx.Common.Logging
 {
-    [JsonConverter(typeof(TypedStringEnumConverter<LogClass>))]
+    [JsonConverter(typeof(JsonStringEnumConverter<LogClass>))]
     public enum LogClass
     {
         Application,
@@ -13,6 +12,7 @@ namespace Ryujinx.Common.Logging
         Cpu,
         Emulation,
         FFmpeg,
+        GdbStub,
         Font,
         Gpu,
         Hid,
@@ -34,6 +34,7 @@ namespace Ryujinx.Common.Logging
         ServiceBsd,
         ServiceBtm,
         ServiceCaps,
+        ServiceEctx,
         ServiceFatal,
         ServiceFriend,
         ServiceFs,
@@ -70,7 +71,8 @@ namespace Ryujinx.Common.Logging
         ServiceVi,
         SurfaceFlinger,
         TamperMachine,
-        Ui,
+        UI,
         Vic,
+        XCIFileTrimmer
     }
 }

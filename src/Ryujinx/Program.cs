@@ -1,144 +1,169 @@
-using Gtk;
+using Avalonia;
+using Avalonia.Threading;
+using DiscordRPC;
+using Gommon;
+using Projektanker.Icons.Avalonia;
+using Projektanker.Icons.Avalonia.FontAwesome;
+using Projektanker.Icons.Avalonia.MaterialDesign;
+using Ryujinx.Ava.Systems;
+using Ryujinx.Ava.Systems.Configuration;
+using Ryujinx.Ava.Systems.Configuration.System;
+using Ryujinx.Ava.UI.Helpers;
+using Ryujinx.Ava.UI.Windows;
+using Ryujinx.Ava.Utilities;
+using Ryujinx.Ava.Utilities.SystemInfo;
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.GraphicsDriver;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.SystemInterop;
-using Ryujinx.Modules;
-using Ryujinx.SDL2.Common;
-using Ryujinx.Ui;
-using Ryujinx.Ui.Common;
-using Ryujinx.Ui.Common.Configuration;
-using Ryujinx.Ui.Common.Helper;
-using Ryujinx.Ui.Common.SystemInfo;
-using Ryujinx.Ui.Widgets;
-using SixLabors.ImageSharp.Formats.Jpeg;
+using Ryujinx.Common.Utilities;
+using Ryujinx.Graphics.RenderDocApi;
+using Ryujinx.Graphics.Vulkan.MoltenVK;
+using Ryujinx.Headless;
+using Ryujinx.SDL3.Common;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Threading.Tasks;
 
-namespace Ryujinx
+namespace Ryujinx.Ava
 {
-    partial class Program
+    internal static class Program
     {
-        public static double WindowScaleFactor { get; private set; }
-
+        public static double WindowScaleFactor { get; set; }
+        public static double DesktopScaleFactor { get; set; } = 1.0;
         public static string Version { get; private set; }
+        public static string ConfigurationPath { get; private set; }
+        public static string GlobalConfigurationPath { get; private set; }
+        public static bool UseExtraConfig { get; set; }
+        public static bool PreviewerDetached { get; private set; }
+        public static bool UseHardwareAcceleration { get; private set; }
+        public static string BackendThreadingArg { get; private set; }
+        public static bool CoreDumpArg { get; private set; }
 
-        public static string ConfigurationPath { get; set; }
+        private const uint MbIconwarning = 0x30;
 
-        public static string CommandLineProfile { get; set; }
-
-        private const string X11LibraryName = "libX11";
-
-        [LibraryImport(X11LibraryName)]
-        private static partial int XInitThreads();
-
-        [LibraryImport("user32.dll", SetLastError = true)]
-        public static partial int MessageBoxA(IntPtr hWnd, [MarshalAs(UnmanagedType.LPStr)] string text, [MarshalAs(UnmanagedType.LPStr)] string caption, uint type);
-
-        [LibraryImport("libc", SetLastError = true)]
-        private static partial int setenv([MarshalAs(UnmanagedType.LPStr)] string name, [MarshalAs(UnmanagedType.LPStr)] string value, int overwrite);
-
-        private const uint MbIconWarning = 0x30;
-
-        static Program()
+        public static int Main(string[] args)
         {
-            if (OperatingSystem.IsLinux())
+            Version = ReleaseInformation.Version;
+
+            if (OperatingSystem.IsWindows())
             {
-                NativeLibrary.SetDllImportResolver(typeof(Program).Assembly, (name, assembly, path) =>
+                if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
                 {
-                    if (name != X11LibraryName)
-                    {
-                        return IntPtr.Zero;
-                    }
+                    _ = Win32NativeInterop.MessageBoxA(nint.Zero, "You are running an outdated version of Windows.\n\nRyujinx supports Windows 10 version 20H1 and newer.\n", $"Ryujinx {Version}", MbIconwarning);
+                    return 0;
+                }
 
-                    if (!NativeLibrary.TryLoad("libX11.so.6", assembly, path, out IntPtr result))
-                    {
-                        if (!NativeLibrary.TryLoad("libX11.so", assembly, path, out result))
-                        {
-                            return IntPtr.Zero;
-                        }
-                    }
+                var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
 
-                    return result;
-                });
+                if (Environment.CurrentDirectory.StartsWithIgnoreCase(programFiles) ||
+                    Environment.CurrentDirectory.StartsWithIgnoreCase(programFilesX86))
+                {
+                    _ = Win32NativeInterop.MessageBoxA(nint.Zero, "Ryujinx is not intended to be run from the Program Files folder. Please move it out and relaunch.", $"Ryujinx {Version}", MbIconwarning);
+                    return 0;
+                }
+
+                // The names of everything here makes no sense for what this actually checks for. Thanks, Microsoft.
+                // If you can't tell by the error string,
+                // this actually checks if the current process was run with "Run as Administrator"
+                // ...but this reads like it checks if the current is in/has the Windows admin role? lol
+                if (new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
+                {
+                    _ = Win32NativeInterop.MessageBoxA(nint.Zero, "Ryujinx is not intended to be run as administrator.", $"Ryujinx {Version}", MbIconwarning);
+                    return 0;
+                }
             }
+
+            bool noGuiArg = ConsumeCommandLineArgument(ref args, "--no-gui") || ConsumeCommandLineArgument(ref args, "nogui");
+            bool coreDumpArg = ConsumeCommandLineArgument(ref args, "--core-dumps");
+
+            CoreDumpArg = coreDumpArg;
+
+            // TODO: Ryujinx causes core dumps on Linux when it exits "uncleanly", eg. through an unhandled exception.
+            //       This is undesirable and causes very odd behavior during development (the process stops responding, 
+            //       the .NET debugger freezes or suddenly detaches, /tmp/ gets filled etc.), unless explicitly requested by the user.
+            //       This needs to be investigated, but calling prctl() is better than modifying system-wide settings or leaving this be.
+            if (!coreDumpArg)
+            {
+                OsUtils.SetCoreDumpable(false);
+            }
+
+            PreviewerDetached = true;
+
+            if (noGuiArg)
+            {
+                HeadlessRyujinx.Entrypoint(args);
+                return 0;
+            }
+
+            Initialize(args);
+
+            LoggerAdapter.Register();
+
+            IconProvider.Current
+                .Register<FontAwesomeIconProvider>()
+                .Register<MaterialDesignIconProvider>();
+
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
 
-        static void Main(string[] args)
-        {
-            Version = ReleaseInformation.GetVersion();
+        public static AppBuilder BuildAvaloniaApp() =>
+            AppBuilder.Configure<RyujinxApp>()
+                .UsePlatformDetect()
+                .With(new X11PlatformOptions
+                {
+                    EnableMultiTouch = true,
+                    EnableIme = true,
+                    EnableInputFocusProxy = Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") == "gamescope",
+                    RenderingMode = UseHardwareAcceleration
+                        ? [X11RenderingMode.Glx, X11RenderingMode.Software]
+                        : [X11RenderingMode.Software]
+                })
+                .With(new Win32PlatformOptions
+                {
+                    WinUICompositionBackdropCornerRadius = 8.0f,
+                    RenderingMode = UseHardwareAcceleration
+                        ? [Win32RenderingMode.AngleEgl, Win32RenderingMode.Software]
+                        : [Win32RenderingMode.Software]
+                });
 
-            if (OperatingSystem.IsWindows() && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17134))
-            {
-                MessageBoxA(IntPtr.Zero, "You are running an outdated version of Windows.\n\nStarting on June 1st 2022, Ryujinx will only support Windows 10 1803 and newer.\n", $"Ryujinx {Version}", MbIconWarning);
-            }
+        private static bool ConsumeCommandLineArgument(ref string[] args, string targetArgument)
+        {
+            List<string> argList = [.. args];
+            bool found = argList.Remove(targetArgument);
+            args = argList.ToArray();
+            return found;
+        }
+
+        private static void Initialize(string[] args)
+        {
+            // Ensure Discord presence timestamp begins at the absolute start of when Ryujinx is launched
+            DiscordIntegrationModule.EmulatorStartedAt = Timestamps.Now;
 
             // Parse arguments
             CommandLineState.ParseArguments(args);
 
-            // Hook unhandled exception and process exit events.
-            GLib.ExceptionManager.UnhandledException += (GLib.UnhandledExceptionArgs e) => ProcessUnhandledException(e.ExceptionObject as Exception, e.IsTerminating);
-            AppDomain.CurrentDomain.UnhandledException += (object sender, UnhandledExceptionEventArgs e) => ProcessUnhandledException(e.ExceptionObject as Exception, e.IsTerminating);
-            AppDomain.CurrentDomain.ProcessExit += (object sender, EventArgs e) => Exit();
-
-            // Make process DPI aware for proper window sizing on high-res screens.
-            ForceDpiAware.Windows();
-            WindowScaleFactor = ForceDpiAware.GetWindowScaleFactor();
+            if (OperatingSystem.IsMacOS())
+            {
+                MVKInitialization.InitializeResolver();
+            }
 
             // Delete backup files after updating.
             Task.Run(Updater.CleanupUpdate);
 
-            Console.Title = $"Ryujinx Console {Version}";
+            Console.Title = $"{RyujinxApp.FullAppName} Console {Version}";
 
-            // NOTE: GTK3 doesn't init X11 in a multi threaded way.
-            // This ends up causing race condition and abort of XCB when a context is created by SPB (even if SPB do call XInitThreads).
-            if (OperatingSystem.IsLinux())
-            {
-                if (XInitThreads() == 0)
-                {
-                    throw new NotSupportedException("Failed to initialize multi-threading support.");
-                }
-
-                Environment.SetEnvironmentVariable("GDK_BACKEND", "x11");
-                setenv("GDK_BACKEND", "x11", 1);
-            }
-
-            if (OperatingSystem.IsMacOS())
-            {
-                string baseDirectory = Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory);
-                string resourcesDataDir;
-
-                if (Path.GetFileName(baseDirectory) == "MacOS")
-                {
-                    resourcesDataDir = Path.Combine(Directory.GetParent(baseDirectory).FullName, "Resources");
-                }
-                else
-                {
-                    resourcesDataDir = baseDirectory;
-                }
-
-                static void SetEnvironmentVariableNoCaching(string key, string value)
-                {
-                    int res = setenv(key, value, 1);
-                    Debug.Assert(res != -1);
-                }
-
-                // On macOS, GTK3 needs XDG_DATA_DIRS to be set, otherwise it will try searching for "gschemas.compiled" in system directories.
-                SetEnvironmentVariableNoCaching("XDG_DATA_DIRS", Path.Combine(resourcesDataDir, "share"));
-
-                // On macOS, GTK3 needs GDK_PIXBUF_MODULE_FILE to be set, otherwise it will try searching for "loaders.cache" in system directories.
-                SetEnvironmentVariableNoCaching("GDK_PIXBUF_MODULE_FILE", Path.Combine(resourcesDataDir, "lib", "gdk-pixbuf-2.0", "2.10.0", "loaders.cache"));
-
-                SetEnvironmentVariableNoCaching("GTK_IM_MODULE_FILE", Path.Combine(resourcesDataDir, "lib", "gtk-3.0", "3.0.0", "immodules.cache"));
-            }
-
-            string systemPath = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine);
-            Environment.SetEnvironmentVariable("Path", $"{Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin")};{systemPath}");
+            // Hook unhandled exception and process exit events.
+            AppDomain.CurrentDomain.UnhandledException += (sender, e)
+                => ProcessUnhandledException(sender, e.ExceptionObject as Exception, e.IsTerminating);
+            TaskScheduler.UnobservedTaskException += (sender, e)
+                => ProcessUnhandledException(sender, e.Exception, false);
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => Exit();
 
             // Setup base data directory.
             AppDataManager.Initialize(CommandLineState.BaseDirPathArg);
@@ -152,223 +177,240 @@ namespace Ryujinx
             // Initialize Discord integration.
             DiscordIntegrationModule.Initialize();
 
-            // Initialize SDL2 driver
-            SDL2Driver.MainThreadDispatcher = action =>
+            // Initialize SDL3 driver
+            SDL3Driver.MainThreadDispatcher = action => Dispatcher.UIThread.InvokeAsync(action, DispatcherPriority.Input);
+
+            ReloadConfig();
+
+            WindowScaleFactor = ForceDpiAware.GetWindowScaleFactor();
+
+            // Logging system information.
+            PrintSystemInfo();
+
+            // Enable OGL multithreading on the driver, and some other flags.
+            DriverUtilities.InitDriverConfig(ConfigurationState.Instance.Graphics.BackendThreading == BackendThreading.Off);
+
+            // Check if keys exists.
+            if (!File.Exists(Path.Combine(AppDataManager.KeysDirPath, "prod.keys")))
             {
-                Application.Invoke(delegate
+                if (!(AppDataManager.Mode == AppDataManager.LaunchMode.UserProfile && File.Exists(Path.Combine(AppDataManager.KeysDirPathUser, "prod.keys"))))
                 {
-                    action();
-                });
-            };
+                    MainWindow.ShowKeyErrorOnLoad = true;
+                }
+            }
 
-            // Sets ImageSharp Jpeg Encoder Quality.
-            SixLabors.ImageSharp.Configuration.Default.ImageFormatsManager.SetEncoder(JpegFormat.Instance, new JpegEncoder()
+            // Take initial memory snapshot after initialization
+            MemoryProfiler.TakeSnapshot();
+
+            // Start periodic memory snapshots every 5 minutes (300 seconds)
+            MemoryProfiler.StartPeriodicSnapshots(300);
+
+            if (CommandLineState.LaunchPathArg != null)
             {
-                Quality = 100,
-            });
+                MainWindow.DeferLoadApplication(CommandLineState.LaunchPathArg, CommandLineState.LaunchApplicationId, CommandLineState.StartFullscreenArg);
+            }
+        }
 
-            string localConfigurationPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config.json");
-            string appDataConfigurationPath = Path.Combine(AppDataManager.BaseDirPath, "Config.json");
+        public static string GetDirGameUserConfig(string gameId, bool changeFolderForGame = false)
+        {
+            if (string.IsNullOrEmpty(gameId))
+            {
+                return "";
+            }
 
-            // Now load the configuration as the other subsystems are now registered
-            ConfigurationPath = File.Exists(localConfigurationPath)
-                ? localConfigurationPath
-                : File.Exists(appDataConfigurationPath)
-                    ? appDataConfigurationPath
-                    : null;
+            string gameDir = Path.Combine(AppDataManager.GamesDirPath, gameId, ReleaseInformation.ConfigName);
 
+            if (changeFolderForGame)
+            {
+                ConfigurationPath = gameDir;
+                UseExtraConfig = true;
+            }
+
+            return gameDir;
+        }
+
+        public static void ReloadConfig(bool isRunGameWithCustomConfig = false)
+        {
+
+            string localConfigurationPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ReleaseInformation.ConfigName);
+            string appDataConfigurationPath = Path.Combine(AppDataManager.BaseDirPath, ReleaseInformation.ConfigName);
+
+
+            if (!isRunGameWithCustomConfig) // To return settings from the game folder if the user configuration exists
+            {
+                // Now load the configuration as the other subsystems are now registered
+                if (File.Exists(localConfigurationPath))
+                {
+                    ConfigurationPath = localConfigurationPath;
+                }
+                else if (File.Exists(appDataConfigurationPath))
+                {
+                    ConfigurationPath = appDataConfigurationPath;
+                }
+            }
+        
             if (ConfigurationPath == null)
             {
                 // No configuration, we load the default values and save it to disk
                 ConfigurationPath = appDataConfigurationPath;
+                Logger.Notice.Print(LogClass.Application, $"No configuration file found. Saving default configuration to: {ConfigurationPath}");
 
                 ConfigurationState.Instance.LoadDefault();
                 ConfigurationState.Instance.ToFileFormat().SaveConfig(ConfigurationPath);
             }
             else
             {
+                Logger.Notice.Print(LogClass.Application, $"Loading configuration from: {ConfigurationPath}");
+
                 if (ConfigurationFileFormat.TryLoad(ConfigurationPath, out ConfigurationFileFormat configurationFileFormat))
                 {
                     ConfigurationState.Instance.Load(configurationFileFormat, ConfigurationPath);
                 }
                 else
                 {
+                    Logger.Warning?.PrintMsg(LogClass.Application, $"Failed to load config! Loading the default config instead.\nFailed config location: {ConfigurationPath}");
+
+                    ConfigurationFileFormat.RenameInvalidConfigFile(ConfigurationPath);
+
                     ConfigurationState.Instance.LoadDefault();
-
-                    Logger.Warning?.PrintMsg(LogClass.Application, $"Failed to load config! Loading the default config instead.\nFailed config location {ConfigurationPath}");
                 }
             }
 
-            // Check if graphics backend was overridden.
-            if (CommandLineState.OverrideGraphicsBackend != null)
+            // When you first load the program, copy to remember the path for the global configuration
+            GlobalConfigurationPath ??= ConfigurationPath;
+
+            UseHardwareAcceleration = ConfigurationState.Instance.EnableHardwareAcceleration;
+
+            // Check if graphics backend was overridden
+            if (CommandLineState.OverrideGraphicsBackend is not null)
+                ConfigurationState.Instance.Graphics.GraphicsBackend.Value = CommandLineState.OverrideGraphicsBackend.ToLower() switch
+                {
+                    "opengl" => GraphicsBackend.OpenGl,
+                    "vulkan" => GraphicsBackend.Vulkan,
+                    _ => ConfigurationState.Instance.Graphics.GraphicsBackend
+                };
+
+            // Check if backend threading was overridden
+            if (CommandLineState.OverrideBackendThreading is not null)
+                ConfigurationState.Instance.Graphics.BackendThreading.Value = CommandLineState.OverrideBackendThreading.ToLower() switch
+                {
+                    "auto" => BackendThreading.Auto,
+                    "off" => BackendThreading.Off,
+                    "on" => BackendThreading.On,
+                    _ => ConfigurationState.Instance.Graphics.BackendThreading
+                };
+
+            if (CommandLineState.OverrideBackendThreadingAfterReboot is not null)
             {
-                if (CommandLineState.OverrideGraphicsBackend.ToLower() == "opengl")
-                {
-                    ConfigurationState.Instance.Graphics.GraphicsBackend.Value = GraphicsBackend.OpenGl;
-                }
-                else if (CommandLineState.OverrideGraphicsBackend.ToLower() == "vulkan")
-                {
-                    ConfigurationState.Instance.Graphics.GraphicsBackend.Value = GraphicsBackend.Vulkan;
-                }
+                BackendThreadingArg = CommandLineState.OverrideBackendThreadingAfterReboot;
             }
+
+            // Check if docked mode was overriden.
+            if (CommandLineState.OverrideDockedMode.HasValue)
+                ConfigurationState.Instance.System.EnableDockedMode.Value = CommandLineState.OverrideDockedMode.Value;
 
             // Check if HideCursor was overridden.
             if (CommandLineState.OverrideHideCursor is not null)
-            {
-                ConfigurationState.Instance.HideCursor.Value = CommandLineState.OverrideHideCursor!.ToLower() switch
+                ConfigurationState.Instance.HideCursor.Value = CommandLineState.OverrideHideCursor.ToLower() switch
                 {
                     "never" => HideCursorMode.Never,
                     "onidle" => HideCursorMode.OnIdle,
                     "always" => HideCursorMode.Always,
-                    _ => ConfigurationState.Instance.HideCursor.Value,
+                    _ => ConfigurationState.Instance.HideCursor,
                 };
-            }
 
-            // Check if docked mode was overridden.
-            if (CommandLineState.OverrideDockedMode.HasValue)
-            {
-                ConfigurationState.Instance.System.EnableDockedMode.Value = CommandLineState.OverrideDockedMode.Value;
-            }
-
-            // Logging system information.
-            PrintSystemInfo();
-
-            // Enable OGL multithreading on the driver, when available.
-            BackendThreading threadingMode = ConfigurationState.Instance.Graphics.BackendThreading;
-            DriverUtilities.ToggleOGLThreading(threadingMode == BackendThreading.Off);
-
-            // Initialize Gtk.
-            Application.Init();
-
-            // Check if keys exists.
-            bool hasSystemProdKeys = File.Exists(Path.Combine(AppDataManager.KeysDirPath, "prod.keys"));
-            bool hasCommonProdKeys = AppDataManager.Mode == AppDataManager.LaunchMode.UserProfile && File.Exists(Path.Combine(AppDataManager.KeysDirPathUser, "prod.keys"));
-            if (!hasSystemProdKeys && !hasCommonProdKeys)
-            {
-                UserErrorDialog.CreateUserErrorDialog(UserError.NoKeys);
-            }
-
-            // Show the main window UI.
-            MainWindow mainWindow = new();
-            mainWindow.Show();
-
-            if (OperatingSystem.IsLinux())
-            {
-                int currentVmMaxMapCount = LinuxHelper.VmMaxMapCount;
-
-                if (LinuxHelper.VmMaxMapCount < LinuxHelper.RecommendedVmMaxMapCount)
+            // Check if memoryManagerMode was overridden. 
+            if (CommandLineState.OverrideMemoryManagerMode is not null)
+                if (Enum.TryParse(CommandLineState.OverrideMemoryManagerMode, true, out MemoryManagerMode result))
                 {
-                    Logger.Warning?.Print(LogClass.Application, $"The value of vm.max_map_count is lower than {LinuxHelper.RecommendedVmMaxMapCount}. ({currentVmMaxMapCount})");
-
-                    if (LinuxHelper.PkExecPath is not null)
-                    {
-                        var buttonTexts = new Dictionary<int, string>()
-                        {
-                            { 0, "Yes, until the next restart" },
-                            { 1, "Yes, permanently" },
-                            { 2, "No" },
-                        };
-
-                        ResponseType response = GtkDialog.CreateCustomDialog(
-                            "Ryujinx - Low limit for memory mappings detected",
-                            $"Would you like to increase the value of vm.max_map_count to {LinuxHelper.RecommendedVmMaxMapCount}?",
-                            "Some games might try to create more memory mappings than currently allowed. " +
-                            "Ryujinx will crash as soon as this limit gets exceeded.",
-                            buttonTexts,
-                            MessageType.Question);
-
-                        int rc;
-
-                        switch ((int)response)
-                        {
-                            case 0:
-                                rc = LinuxHelper.RunPkExec($"echo {LinuxHelper.RecommendedVmMaxMapCount} > {LinuxHelper.VmMaxMapCountPath}");
-                                if (rc == 0)
-                                {
-                                    Logger.Info?.Print(LogClass.Application, $"vm.max_map_count set to {LinuxHelper.VmMaxMapCount} until the next restart.");
-                                }
-                                else
-                                {
-                                    Logger.Error?.Print(LogClass.Application, $"Unable to change vm.max_map_count. Process exited with code: {rc}");
-                                }
-                                break;
-                            case 1:
-                                rc = LinuxHelper.RunPkExec($"echo \"vm.max_map_count = {LinuxHelper.RecommendedVmMaxMapCount}\" > {LinuxHelper.SysCtlConfigPath} && sysctl -p {LinuxHelper.SysCtlConfigPath}");
-                                if (rc == 0)
-                                {
-                                    Logger.Info?.Print(LogClass.Application, $"vm.max_map_count set to {LinuxHelper.VmMaxMapCount}. Written to config: {LinuxHelper.SysCtlConfigPath}");
-                                }
-                                else
-                                {
-                                    Logger.Error?.Print(LogClass.Application, $"Unable to write new value for vm.max_map_count to config. Process exited with code: {rc}");
-                                }
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        GtkDialog.CreateWarningDialog(
-                            "Max amount of memory mappings is lower than recommended.",
-                            $"The current value of vm.max_map_count ({currentVmMaxMapCount}) is lower than {LinuxHelper.RecommendedVmMaxMapCount}." +
-                            "Some games might try to create more memory mappings than currently allowed. " +
-                            "Ryujinx will crash as soon as this limit gets exceeded.\n\n" +
-                            "You might want to either manually increase the limit or install pkexec, which allows Ryujinx to assist with that.");
-                    }
+                    ConfigurationState.Instance.System.MemoryManagerMode.Value = result;
                 }
-            }
 
-            if (CommandLineState.LaunchPathArg != null)
-            {
-                mainWindow.RunApplication(CommandLineState.LaunchPathArg, CommandLineState.StartFullscreenArg);
-            }
-
-            if (ConfigurationState.Instance.CheckUpdatesOnStart.Value && Updater.CanUpdate(false))
-            {
-                Updater.BeginParse(mainWindow, false).ContinueWith(task =>
+            // Check if PPTC was overridden. 
+            if (CommandLineState.OverridePPTC is not null)
+                if (Enum.TryParse(CommandLineState.OverridePPTC, true, out bool result))
                 {
-                    Logger.Error?.Print(LogClass.Application, $"Updater Error: {task.Exception}");
-                }, TaskContinuationOptions.OnlyOnFaulted);
-            }
+                    ConfigurationState.Instance.System.EnablePtc.Value = result;
+                }
 
-            Application.Run();
+            // Check if region was overridden. 
+            if (CommandLineState.OverrideSystemRegion is not null)
+                if (Enum.TryParse(CommandLineState.OverrideSystemRegion, true, out Region result))
+                {
+                    ConfigurationState.Instance.System.Region.Value = result;
+                }
+
+            //Check if language was overridden. 
+            if (CommandLineState.OverrideSystemLanguage is not null)
+                if (Enum.TryParse(CommandLineState.OverrideSystemLanguage, true, out Language result))
+                {
+                    ConfigurationState.Instance.System.Language.Value = result;
+                }
+
+            // Check if hardware-acceleration was overridden.
+            if (CommandLineState.OverrideHardwareAcceleration != null)
+                UseHardwareAcceleration = CommandLineState.OverrideHardwareAcceleration.Value;
         }
 
-        private static void PrintSystemInfo()
+        internal static void PrintSystemInfo()
         {
-            Logger.Notice.Print(LogClass.Application, $"Ryujinx Version: {Version}");
+            Logger.Notice.Print(LogClass.Application,  "   ___                 __    _              ");
+            Logger.Notice.Print(LogClass.Application, @"  / _ \  __ __ __ __  / /   (_)  ___   ___ _");
+            Logger.Notice.Print(LogClass.Application, @" / , _/ / // // // / / _ \ / /  / _ \ / _ `/");
+            Logger.Notice.Print(LogClass.Application, @"/_/|_|  \_, / \_,_/ /_.__//_/  /_//_/ \_, / ");
+            Logger.Notice.Print(LogClass.Application,  "       /___/                         /___/  ");
+
+
+            Logger.Notice.Print(LogClass.Application, $"{RyujinxApp.FullAppName} Version: {Version}");
+            Logger.Notice.Print(LogClass.Application, $".NET Runtime: {RuntimeInformation.FrameworkDescription}");
             SystemInfo.Gather().Print();
 
-            var enabledLogs = Logger.GetEnabledLevels();
-            Logger.Notice.Print(LogClass.Application, $"Logs Enabled: {(enabledLogs.Count == 0 ? "<None>" : string.Join(", ", enabledLogs))}");
+            Logger.Notice.Print(LogClass.Application, $"Logs Enabled: {Logger.GetEnabledLevels()
+                    .FormatCollection(
+                        x => x.ToString(),
+                        separator: ", ",
+                        emptyCollectionFallback: "<None>")}");
 
-            if (AppDataManager.Mode == AppDataManager.LaunchMode.Custom)
+            Logger.Notice.Print(LogClass.Application,
+                AppDataManager.Mode == AppDataManager.LaunchMode.Custom
+                    ? $"Launch Mode: Custom Path {AppDataManager.BaseDirPath}"
+                    : $"Launch Mode: {AppDataManager.Mode}");
+        }
+
+        internal static void ProcessUnhandledException(object sender, Exception initialException, bool isTerminating)
+        {
+            Logger.Log log = Logger.Error ?? Logger.Notice;
+
+            List<Exception> exceptions = [];
+
+            if (initialException is AggregateException ae)
             {
-                Logger.Notice.Print(LogClass.Application, $"Launch Mode: Custom Path {AppDataManager.BaseDirPath}");
+                exceptions.AddRange(ae.InnerExceptions);
             }
             else
             {
-                Logger.Notice.Print(LogClass.Application, $"Launch Mode: {AppDataManager.Mode}");
+                exceptions.Add(initialException);
             }
-        }
 
-        private static void ProcessUnhandledException(Exception ex, bool isTerminating)
-        {
-            string message = $"Unhandled exception caught: {ex}";
-
-            Logger.Error?.PrintMsg(LogClass.Application, message);
-
-            if (Logger.Error == null)
+            foreach (Exception e in exceptions)
             {
-                Logger.Notice.PrintMsg(LogClass.Application, message);
+                string message = $"Unhandled exception caught: {e}";
+                // ReSharper disable once ConstantConditionalAccessQualifier
+                if (sender?.GetType()?.AsPrettyString() is { } senderName)
+                    log.Print(LogClass.Application, message, senderName);
+                else
+                    log.PrintMsg(LogClass.Application, message);
             }
+
 
             if (isTerminating)
             {
+                Logger.Flush();
                 Exit();
             }
         }
 
-        public static void Exit()
+        internal static void Exit()
         {
             DiscordIntegrationModule.Exit();
 

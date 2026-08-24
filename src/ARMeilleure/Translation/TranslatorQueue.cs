@@ -36,7 +36,7 @@ namespace ARMeilleure.Translation
             Sync = new object();
 
             _requests = new Stack<RejitRequest>();
-            _requestAddresses = new HashSet<ulong>();
+            _requestAddresses = [];
         }
 
         /// <summary>
@@ -80,7 +80,10 @@ namespace ARMeilleure.Translation
                         return true;
                     }
 
-                    Monitor.Wait(Sync);
+                    if (!_disposed)
+                    {
+                        Monitor.Wait(Sync);
+                    }
                 }
             }
 

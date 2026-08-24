@@ -208,11 +208,9 @@ namespace Ryujinx.Audio.Renderer.Server.Performance
 
         public override bool GetNextEntry(out PerformanceEntryAddresses performanceEntry, PerformanceEntryType entryType, int nodeId)
         {
-            performanceEntry = new PerformanceEntryAddresses
-            {
-                BaseMemory = SpanMemoryManager<int>.Cast(CurrentBuffer),
-                EntryCountOffset = (uint)CurrentHeader.GetEntryCountOffset(),
-            };
+            performanceEntry = PerformanceEntryAddresses.PerformanceEntryAddressesPool.Allocate();
+            performanceEntry.BaseMemory = SpanMemoryManager<int>.Cast(CurrentBuffer);
+            performanceEntry.EntryCountOffset = (uint)CurrentHeader.GetEntryCountOffset();
 
             uint baseEntryOffset = (uint)(Unsafe.SizeOf<THeader>() + Unsafe.SizeOf<TEntry>() * _entryIndex);
 
@@ -234,18 +232,16 @@ namespace Ryujinx.Audio.Renderer.Server.Performance
         {
             performanceEntry = null;
 
-            if (_entryDetailIndex > MaxFrameDetailCount)
+            if (_entryDetailIndex >= MaxFrameDetailCount)
             {
                 return false;
             }
+            
+            performanceEntry = PerformanceEntryAddresses.PerformanceEntryAddressesPool.Allocate();
+            performanceEntry.BaseMemory = SpanMemoryManager<int>.Cast(CurrentBuffer);
+            performanceEntry.EntryCountOffset = (uint)CurrentHeader.GetEntryCountOffset();
 
-            performanceEntry = new PerformanceEntryAddresses
-            {
-                BaseMemory = SpanMemoryManager<int>.Cast(CurrentBuffer),
-                EntryCountOffset = (uint)CurrentHeader.GetEntryCountOffset(),
-            };
-
-            uint baseEntryOffset = (uint)(Unsafe.SizeOf<THeader>() + GetEntriesSize() + Unsafe.SizeOf<IPerformanceDetailEntry>() * _entryDetailIndex);
+            uint baseEntryOffset = (uint)(Unsafe.SizeOf<THeader>() + GetEntriesSize() + Unsafe.SizeOf<TEntryDetail>() * _entryDetailIndex);
 
             ref TEntryDetail entryDetail = ref EntriesDetail[_entryDetailIndex];
 

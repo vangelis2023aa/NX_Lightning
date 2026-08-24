@@ -6,10 +6,12 @@ using Ryujinx.Graphics.Gpu.Shader.DiskCache;
 using Ryujinx.Graphics.Shader;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using TextureDescriptor = Ryujinx.Graphics.Shader.TextureDescriptor;
 
 namespace Ryujinx.Graphics.Gpu.Shader
 {
@@ -30,6 +32,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
         {
             PrimitiveTopology = 1 << 1,
             TransformFeedback = 1 << 3,
+            TextureArrayFromBuffer = 1 << 4,
+            TextureArrayFromPool = 1 << 5,
         }
 
         private QueriedStateFlags _queriedState;
@@ -153,6 +157,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
         }
 
         private readonly Dictionary<TextureKey, Box<TextureSpecializationState>> _textureSpecialization;
+        private readonly Dictionary<TextureKey, int> _textureArrayFromBufferSpecialization;
+        private readonly Dictionary<bool, int> _textureArrayFromPoolSpecialization;
         private KeyValuePair<TextureKey, Box<TextureSpecializationState>>[] _allTextures;
         private Box<TextureSpecializationState>[][] _textureByBinding;
         private Box<TextureSpecializationState>[][] _imageByBinding;
@@ -163,6 +169,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
         private ShaderSpecializationState()
         {
             _textureSpecialization = new Dictionary<TextureKey, Box<TextureSpecializationState>>();
+            _textureArrayFromBufferSpecialization = new Dictionary<TextureKey, int>();
+            _textureArrayFromPoolSpecialization = new Dictionary<bool, int>();
         }
 
         /// <summary>
@@ -208,23 +216,23 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 CachedShaderStage stage = stages[i];
                 if (stage?.Info != null)
                 {
-                    var textures = stage.Info.Textures;
-                    var images = stage.Info.Images;
+                    ReadOnlyCollection<TextureDescriptor> textures = stage.Info.Textures;
+                    ReadOnlyCollection<TextureDescriptor> images = stage.Info.Images;
 
-                    var texBindings = new Box<TextureSpecializationState>[textures.Count];
-                    var imageBindings = new Box<TextureSpecializationState>[images.Count];
+                    Box<TextureSpecializationState>[] texBindings = new Box<TextureSpecializationState>[textures.Count];
+                    Box<TextureSpecializationState>[] imageBindings = new Box<TextureSpecializationState>[images.Count];
 
                     int stageIndex = Math.Max(i - 1, 0); // Don't count VertexA for looking up spec state. No-Op for compute.
 
                     for (int j = 0; j < textures.Count; j++)
                     {
-                        var texture = textures[j];
+                        TextureDescriptor texture = textures[j];
                         texBindings[j] = GetTextureSpecState(stageIndex, texture.HandleIndex, texture.CbufSlot);
                     }
 
                     for (int j = 0; j < images.Count; j++)
                     {
-                        var image = images[j];
+                        TextureDescriptor image = images[j];
                         imageBindings[j] = GetTextureSpecState(stageIndex, image.HandleIndex, image.CbufSlot);
                     }
 
@@ -324,6 +332,30 @@ namespace Ryujinx.Graphics.Gpu.Shader
         }
 
         /// <summary>
+        /// Registers the length of a texture array calculated from a constant buffer size.
+        /// </summary>
+        /// <param name="stageIndex">Shader stage where the texture is used</param>
+        /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
+        /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
+        /// <param name="length">Number of elements in the texture array</param>
+        public void RegisterTextureArrayLengthFromBuffer(int stageIndex, int handle, int cbufSlot, int length)
+        {
+            _textureArrayFromBufferSpecialization[new TextureKey(stageIndex, handle, cbufSlot)] = length;
+            _queriedState |= QueriedStateFlags.TextureArrayFromBuffer;
+        }
+
+        /// <summary>
+        /// Registers the length of a texture array calculated from a texture or sampler pool capacity.
+        /// </summary>
+        /// <param name="isSampler">True for sampler pool, false for texture pool</param>
+        /// <param name="length">Number of elements in the texture array</param>
+        public void RegisterTextureArrayLengthFromPool(bool isSampler, int length)
+        {
+            _textureArrayFromPoolSpecialization[isSampler] = length;
+            _queriedState |= QueriedStateFlags.TextureArrayFromPool;
+        }
+
+        /// <summary>
         /// Indicates that the format of a given texture was used during the shader translation process.
         /// </summary>
         /// <param name="stageIndex">Shader stage where the texture is used</param>
@@ -365,11 +397,11 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <returns>True if queried, false otherwise</returns>
         public bool IsPrimitiveTopologyQueried()
         {
-            return _queriedState.HasFlag(QueriedStateFlags.PrimitiveTopology);
+            return (_queriedState & QueriedStateFlags.PrimitiveTopology) == QueriedStateFlags.PrimitiveTopology;
         }
 
         /// <summary>
-        /// Checks if a given texture was registerd on this specialization state.
+        /// Checks if a given texture was registered on this specialization state.
         /// </summary>
         /// <param name="stageIndex">Shader stage where the texture is used</param>
         /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
@@ -380,11 +412,34 @@ namespace Ryujinx.Graphics.Gpu.Shader
         }
 
         /// <summary>
+        /// Checks if a given texture array (from constant buffer) was registered on this specialization state.
+        /// </summary>
+        /// <param name="stageIndex">Shader stage where the texture is used</param>
+        /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
+        /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
+        /// <returns>True if the length for the given buffer and stage exists, false otherwise</returns>
+        public bool TextureArrayFromBufferRegistered(int stageIndex, int handle, int cbufSlot)
+        {
+            return _textureArrayFromBufferSpecialization.ContainsKey(new TextureKey(stageIndex, handle, cbufSlot));
+        }
+
+        /// <summary>
+        /// Checks if a given texture array (from a sampler pool or texture pool) was registered on this specialization state.
+        /// </summary>
+        /// <param name="isSampler">True for sampler pool, false for texture pool</param>
+        /// <returns>True if the length for the given pool, false otherwise</returns>
+        public bool TextureArrayFromPoolRegistered(bool isSampler)
+        {
+            return _textureArrayFromPoolSpecialization.ContainsKey(isSampler);
+        }
+
+        /// <summary>
         /// Gets the recorded format of a given texture.
         /// </summary>
         /// <param name="stageIndex">Shader stage where the texture is used</param>
         /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
         /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
+        /// <returns>Format and sRGB tuple</returns>
         public (uint, bool) GetFormat(int stageIndex, int handle, int cbufSlot)
         {
             TextureSpecializationState state = GetTextureSpecState(stageIndex, handle, cbufSlot).Value;
@@ -397,6 +452,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <param name="stageIndex">Shader stage where the texture is used</param>
         /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
         /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
+        /// <returns>Texture target</returns>
         public TextureTarget GetTextureTarget(int stageIndex, int handle, int cbufSlot)
         {
             return GetTextureSpecState(stageIndex, handle, cbufSlot).Value.TextureTarget;
@@ -408,9 +464,32 @@ namespace Ryujinx.Graphics.Gpu.Shader
         /// <param name="stageIndex">Shader stage where the texture is used</param>
         /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
         /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
+        /// <returns>True if coordinates are normalized, false otherwise</returns>
         public bool GetCoordNormalized(int stageIndex, int handle, int cbufSlot)
         {
             return GetTextureSpecState(stageIndex, handle, cbufSlot).Value.CoordNormalized;
+        }
+
+        /// <summary>
+        /// Gets the recorded length of a given texture array (from constant buffer).
+        /// </summary>
+        /// <param name="stageIndex">Shader stage where the texture is used</param>
+        /// <param name="handle">Offset in words of the texture handle on the texture buffer</param>
+        /// <param name="cbufSlot">Slot of the texture buffer constant buffer</param>
+        /// <returns>Texture array length</returns>
+        public int GetTextureArrayFromBufferLength(int stageIndex, int handle, int cbufSlot)
+        {
+            return _textureArrayFromBufferSpecialization[new TextureKey(stageIndex, handle, cbufSlot)];
+        }
+
+        /// <summary>
+        /// Gets the recorded length of a given texture array (from a sampler or texture pool).
+        /// </summary>
+        /// <param name="isSampler">True to get the sampler pool length, false to get the texture pool length</param>
+        /// <returns>Texture array length</returns>
+        public int GetTextureArrayFromPoolLength(bool isSampler)
+        {
+            return _textureArrayFromPoolSpecialization[isSampler];
         }
 
         /// <summary>
@@ -501,10 +580,13 @@ namespace Ryujinx.Graphics.Gpu.Shader
 
             if (ShaderCache.MayConvertVtgToCompute(ref channel.Capabilities) && !vertexAsCompute)
             {
-                for (int index = 0; index < graphicsState.AttributeTypes.Length; index++)
+                Span<AttributeType> attributeTypesSpan = graphicsState.AttributeTypes.AsSpan();
+                Span<AttributeType> gAttributeTypesSpan = GraphicsState.AttributeTypes.AsSpan();
+                
+                for (int index = 0; index < attributeTypesSpan.Length; index++)
                 {
-                    AttributeType lType = FilterAttributeType(channel, graphicsState.AttributeTypes[index]);
-                    AttributeType rType = FilterAttributeType(channel, GraphicsState.AttributeTypes[index]);
+                    AttributeType lType = FilterAttributeType(channel, attributeTypesSpan[index]);
+                    AttributeType rType = FilterAttributeType(channel, gAttributeTypesSpan[index]);
 
                     if (lType != rType)
                     {
@@ -548,6 +630,12 @@ namespace Ryujinx.Graphics.Gpu.Shader
             return Matches(channel, ref poolState, checkTextures, isCompute: false);
         }
 
+        /// <summary>
+        /// Converts special vertex attribute groups to their generic equivalents, for comparison purposes.
+        /// </summary>
+        /// <param name="channel">GPU channel</param>
+        /// <param name="type">Vertex attribute type</param>
+        /// <returns>Filtered attribute</returns>
         private static AttributeType FilterAttributeType(GpuChannel channel, AttributeType type)
         {
             type &= ~(AttributeType.Packed | AttributeType.PackedRgb10A2Signed);
@@ -644,6 +732,8 @@ namespace Ryujinx.Graphics.Gpu.Shader
         {
             int constantBufferUsePerStageMask = _constantBufferUsePerStage;
 
+            Span<uint> constantBufferUseSpan = ConstantBufferUse.AsSpan();
+            
             while (constantBufferUsePerStageMask != 0)
             {
                 int index = BitOperations.TrailingZeroCount(constantBufferUsePerStageMask);
@@ -652,7 +742,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
                     ? channel.BufferManager.GetComputeUniformBufferUseMask()
                     : channel.BufferManager.GetGraphicsUniformBufferUseMask(index);
 
-                if (ConstantBufferUse[index] != useMask)
+                if (constantBufferUseSpan[index] != useMask)
                 {
                     return false;
                 }
@@ -660,7 +750,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 constantBufferUsePerStageMask &= ~(1 << index);
             }
 
-            if (checkTextures)
+            if (checkTextures && _allTextures.Length > 0)
             {
                 TexturePool pool = channel.TextureManager.GetTexturePool(poolState.TexturePoolGpuVa, poolState.TexturePoolMaximumId);
 
@@ -670,7 +760,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 ReadOnlySpan<int> cachedTextureBuffer = Span<int>.Empty;
                 ReadOnlySpan<int> cachedSamplerBuffer = Span<int>.Empty;
 
-                foreach (var kv in _allTextures)
+                foreach (KeyValuePair<TextureKey, Box<TextureSpecializationState>> kv in _allTextures)
                 {
                     TextureKey textureKey = kv.Key;
 
@@ -716,7 +806,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
         {
             if (specializationState != null)
             {
-                if (specializationState.Value.QueriedFlags.HasFlag(QueriedTextureStateFlags.CoordNormalized) &&
+                if ((specializationState.Value.QueriedFlags & QueriedTextureStateFlags.CoordNormalized) == QueriedTextureStateFlags.CoordNormalized &&
                     specializationState.Value.CoordNormalized != descriptor.UnpackTextureCoordNormalized())
                 {
                     return false;
@@ -792,10 +882,12 @@ namespace Ryujinx.Graphics.Gpu.Shader
 
             int constantBufferUsePerStageMask = specState._constantBufferUsePerStage;
 
+            Span<uint> constantBufferUseSpan = specState.ConstantBufferUse.AsSpan();
+            
             while (constantBufferUsePerStageMask != 0)
             {
                 int index = BitOperations.TrailingZeroCount(constantBufferUsePerStageMask);
-                dataReader.Read(ref specState.ConstantBufferUse[index]);
+                dataReader.Read(ref constantBufferUseSpan[index]);
                 constantBufferUsePerStageMask &= ~(1 << index);
             }
 
@@ -812,7 +904,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 specState.PipelineState = pipelineState;
             }
 
-            if (specState._queriedState.HasFlag(QueriedStateFlags.TransformFeedback))
+            if ((specState._queriedState & QueriedStateFlags.TransformFeedback) == QueriedStateFlags.TransformFeedback)
             {
                 ushort tfCount = 0;
                 dataReader.Read(ref tfCount);
@@ -836,6 +928,38 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 dataReader.ReadWithMagicAndSize(ref textureState.Value, TexsMagic);
 
                 specState._textureSpecialization[textureKey] = textureState;
+            }
+
+            if ((specState._queriedState & QueriedStateFlags.TextureArrayFromBuffer) == QueriedStateFlags.TextureArrayFromBuffer)
+            {
+                dataReader.Read(ref count);
+
+                for (int index = 0; index < count; index++)
+                {
+                    TextureKey textureKey = default;
+                    int length = 0;
+
+                    dataReader.ReadWithMagicAndSize(ref textureKey, TexkMagic);
+                    dataReader.Read(ref length);
+
+                    specState._textureArrayFromBufferSpecialization[textureKey] = length;
+                }
+            }
+
+            if ((specState._queriedState & QueriedStateFlags.TextureArrayFromPool) == QueriedStateFlags.TextureArrayFromPool)
+            {
+                dataReader.Read(ref count);
+
+                for (int index = 0; index < count; index++)
+                {
+                    bool textureKey = default;
+                    int length = 0;
+
+                    dataReader.ReadWithMagicAndSize(ref textureKey, TexkMagic);
+                    dataReader.Read(ref length);
+
+                    specState._textureArrayFromPoolSpecialization[textureKey] = length;
+                }
             }
 
             return specState;
@@ -862,11 +986,13 @@ namespace Ryujinx.Graphics.Gpu.Shader
             dataWriter.Write(ref _constantBufferUsePerStage);
 
             int constantBufferUsePerStageMask = _constantBufferUsePerStage;
+            
+            Span<uint> constantBufferUseSpan = ConstantBufferUse.AsSpan();
 
             while (constantBufferUsePerStageMask != 0)
             {
                 int index = BitOperations.TrailingZeroCount(constantBufferUsePerStageMask);
-                dataWriter.Write(ref ConstantBufferUse[index]);
+                dataWriter.Write(ref constantBufferUseSpan[index]);
                 constantBufferUsePerStageMask &= ~(1 << index);
             }
 
@@ -880,7 +1006,7 @@ namespace Ryujinx.Graphics.Gpu.Shader
                 dataWriter.WriteWithMagicAndSize(ref pipelineState, PgpsMagic);
             }
 
-            if (_queriedState.HasFlag(QueriedStateFlags.TransformFeedback))
+            if ((_queriedState & QueriedStateFlags.TransformFeedback) == QueriedStateFlags.TransformFeedback)
             {
                 ushort tfCount = (ushort)TransformFeedbackDescriptors.Length;
                 dataWriter.Write(ref tfCount);
@@ -894,13 +1020,43 @@ namespace Ryujinx.Graphics.Gpu.Shader
             ushort count = (ushort)_textureSpecialization.Count;
             dataWriter.Write(ref count);
 
-            foreach (var kv in _textureSpecialization)
+            foreach (KeyValuePair<TextureKey, Box<TextureSpecializationState>> kv in _textureSpecialization)
             {
-                var textureKey = kv.Key;
-                var textureState = kv.Value;
+                TextureKey textureKey = kv.Key;
+                Box<TextureSpecializationState> textureState = kv.Value;
 
                 dataWriter.WriteWithMagicAndSize(ref textureKey, TexkMagic);
                 dataWriter.WriteWithMagicAndSize(ref textureState.Value, TexsMagic);
+            }
+
+            if ((_queriedState & QueriedStateFlags.TextureArrayFromBuffer) == QueriedStateFlags.TextureArrayFromBuffer)
+            {
+                count = (ushort)_textureArrayFromBufferSpecialization.Count;
+                dataWriter.Write(ref count);
+
+                foreach (KeyValuePair<TextureKey, int> kv in _textureArrayFromBufferSpecialization)
+                {
+                    TextureKey textureKey = kv.Key;
+                    int length = kv.Value;
+
+                    dataWriter.WriteWithMagicAndSize(ref textureKey, TexkMagic);
+                    dataWriter.Write(ref length);
+                }
+            }
+
+            if ((_queriedState & QueriedStateFlags.TextureArrayFromPool) == QueriedStateFlags.TextureArrayFromPool)
+            {
+                count = (ushort)_textureArrayFromPoolSpecialization.Count;
+                dataWriter.Write(ref count);
+
+                foreach (KeyValuePair<bool, int> kv in _textureArrayFromPoolSpecialization)
+                {
+                    bool textureKey = kv.Key;
+                    int length = kv.Value;
+
+                    dataWriter.WriteWithMagicAndSize(ref textureKey, TexkMagic);
+                    dataWriter.Write(ref length);
+                }
             }
         }
     }

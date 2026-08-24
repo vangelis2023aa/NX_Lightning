@@ -1,9 +1,11 @@
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Ryujinx.Common.Logging;
 using Ryujinx.HLE.HOS.Kernel.Threading;
 using Ryujinx.HLE.HOS.Services.Account.Acc.AsyncContext;
 using System;
-using System.IdentityModel.Tokens.Jwt;
+using System.Collections.Generic;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -14,11 +16,17 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
     class ManagerServer
     {
         // TODO: Determine where and how NetworkServiceAccountId is set.
-        private const long NetworkServiceAccountId = 0xcafe;
+        private const long DefaultNetworkServiceAccountId = 0xcafe;
+
+        private long NetworkServiceAccountId => _userId == default ? DefaultNetworkServiceAccountId : DefaultNetworkServiceAccountId + _userId.High;
+
 
 #pragma warning disable IDE0052 // Remove unread private member
         private readonly UserId _userId;
 #pragma warning restore IDE0052
+
+        private byte[] _cachedTokenData;
+        private DateTime _cachedTokenExpiry;
 
         public ManagerServer(UserId userId)
         {
@@ -33,14 +41,9 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
 
             RsaSecurityKey secKey = new(parameters);
 
-            SigningCredentials credentials = new(secKey, "RS256");
+            SigningCredentials credentials = new(secKey, SecurityAlgorithms.RsaSha256);
 
             credentials.Key.KeyId = parameters.ToString();
-
-            var header = new JwtHeader(credentials)
-            {
-                { "jku", "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com/1.0.0/certificates" },
-            };
 
             byte[] rawUserId = new byte[0x10];
             RandomNumberGenerator.Fill(rawUserId);
@@ -49,25 +52,27 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
             RandomNumberGenerator.Fill(deviceId);
 
             byte[] deviceAccountId = new byte[0x10];
-            RandomNumberGenerator.Fill(deviceId);
+            RandomNumberGenerator.Fill(deviceAccountId);
 
-            var payload = new JwtPayload
+            SecurityTokenDescriptor descriptor = new()
             {
-                { "sub", Convert.ToHexString(rawUserId).ToLower() },
-                { "aud", "ed9e2f05d286f7b8" },
-                { "di", Convert.ToHexString(deviceId).ToLower() },
-                { "sn", "XAW10000000000" },
-                { "bs:did", Convert.ToHexString(deviceAccountId).ToLower() },
-                { "iss", "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com" },
-                { "typ", "id_token" },
-                { "iat", DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
-                { "jti", Guid.NewGuid().ToString() },
-                { "exp", (DateTimeOffset.UtcNow + TimeSpan.FromHours(3)).ToUnixTimeSeconds() },
+                Subject = new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, Convert.ToHexString(rawUserId).ToLower())]),
+                SigningCredentials = credentials,
+                Audience = "ed9e2f05d286f7b8",
+                Issuer = "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com",
+                TokenType = "id_token",
+                IssuedAt = DateTime.UtcNow,
+                Expires = DateTime.UtcNow + TimeSpan.FromHours(3),
+                Claims = new Dictionary<string, object>
+                {
+                    { "jku", "https://e0d67c509fb203858ebcb2fe3f88c2aa.baas.nintendo.com/1.0.0/certificates" },
+                    { "di", Convert.ToHexString(deviceId).ToLower() },
+                    { "sn", "XAW10000000000" },
+                    { "bs:did", Convert.ToHexString(deviceAccountId).ToLower() }
+                }
             };
 
-            JwtSecurityToken securityToken = new(header, payload);
-
-            return new JwtSecurityTokenHandler().WriteToken(securityToken);
+            return new JsonWebTokenHandler().CreateToken(descriptor);
         }
 
         public ResultCode CheckAvailability(ServiceCtx context)
@@ -145,7 +150,13 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
             }
             */
 
-            byte[] tokenData = Encoding.ASCII.GetBytes(GenerateIdToken());
+            if (_cachedTokenData == null || DateTime.UtcNow > _cachedTokenExpiry)
+            {
+                _cachedTokenExpiry = DateTime.UtcNow + TimeSpan.FromHours(3);
+                _cachedTokenData = Encoding.ASCII.GetBytes(GenerateIdToken());
+            }
+
+            byte[] tokenData = _cachedTokenData;
 
             context.Memory.Write(bufferPosition, tokenData);
             context.ResponseData.Write(tokenData.Length);

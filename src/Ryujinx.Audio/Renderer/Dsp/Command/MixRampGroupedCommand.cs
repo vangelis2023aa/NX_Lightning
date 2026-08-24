@@ -8,23 +8,35 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
     {
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
         public CommandType CommandType => CommandType.MixRampGrouped;
 
         public uint EstimatedProcessingTime { get; set; }
 
-        public uint MixBufferCount { get; }
+        public uint MixBufferCount { get; private set; }
 
-        public ushort[] InputBufferIndices { get; }
-        public ushort[] OutputBufferIndices { get; }
+        public ushort[] InputBufferIndices { get; private set; }
+        public ushort[] OutputBufferIndices { get; private set; }
 
-        public float[] Volume0 { get; }
-        public float[] Volume1 { get; }
+        public float[] Volume0 { get; private set; }
+        public float[] Volume1 { get; private set; }
 
-        public Memory<VoiceUpdateState> State { get; }
+        public Memory<VoiceState> State { get; private set; }
 
-        public MixRampGroupedCommand(uint mixBufferCount, uint inputBufferIndex, uint outputBufferIndex, Span<float> volume0, Span<float> volume1, Memory<VoiceUpdateState> state, int nodeId)
+        public MixRampGroupedCommand()
+        {
+            
+        }
+
+        public MixRampGroupedCommand Initialize(
+            uint mixBufferCount,
+            uint inputBufferIndex,
+            uint outputBufferIndex,
+            ReadOnlySpan<float> volume0,
+            ReadOnlySpan<float> volume1,
+            Memory<VoiceState> state,
+            int nodeId)
         {
             Enabled = true;
             MixBufferCount = mixBufferCount;
@@ -45,10 +57,17 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
             }
 
             State = state;
+            
+            return this;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float ProcessMixRampGrouped(Span<float> outputBuffer, ReadOnlySpan<float> inputBuffer, float volume0, float volume1, int sampleCount)
+        private static float ProcessMixRampGrouped(
+            Span<float> outputBuffer,
+            ReadOnlySpan<float> inputBuffer,
+            float volume0,
+            float volume1,
+            int sampleCount)
         {
             float ramp = (volume1 - volume0) / sampleCount;
             float volume = volume0;
@@ -67,6 +86,10 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
         public void Process(CommandList context)
         {
+            ref VoiceState state = ref State.Span[0];
+            
+            Span<float> lastSamplesSpan = state.LastSamples.AsSpan();
+            
             for (int i = 0; i < MixBufferCount; i++)
             {
                 ReadOnlySpan<float> inputBuffer = context.GetBuffer(InputBufferIndices[i]);
@@ -75,15 +98,13 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                 float volume0 = Volume0[i];
                 float volume1 = Volume1[i];
 
-                ref VoiceUpdateState state = ref State.Span[0];
-
                 if (volume0 != 0 || volume1 != 0)
                 {
-                    state.LastSamples[i] = ProcessMixRampGrouped(outputBuffer, inputBuffer, volume0, volume1, (int)context.SampleCount);
+                    lastSamplesSpan[i] = ProcessMixRampGrouped(outputBuffer, inputBuffer, volume0, volume1, (int)context.SampleCount);
                 }
                 else
                 {
-                    state.LastSamples[i] = 0;
+                    lastSamplesSpan[i] = 0;
                 }
             }
         }

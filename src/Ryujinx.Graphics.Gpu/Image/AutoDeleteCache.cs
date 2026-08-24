@@ -1,3 +1,5 @@
+using Ryujinx.Common.Logging;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -46,7 +48,16 @@ namespace Ryujinx.Graphics.Gpu.Image
     {
         private const int MinCountForDeletion = 32;
         private const int MaxCapacity = 2048;
-        private const ulong MaxTextureSizeCapacity = 512 * 1024 * 1024; // MB;
+        private const ulong GiB = 1024 * 1024 * 1024;
+        private ulong MaxTextureSizeCapacity = 4UL * GiB;
+        private const ulong MinTextureSizeCapacity = 512 * 1024 * 1024;
+        private const ulong DefaultTextureSizeCapacity = 1 * GiB;
+        private const ulong TextureSizeCapacity6GiB = 4 * GiB;
+        private const ulong TextureSizeCapacity8GiB = 6 * GiB;
+        private const ulong TextureSizeCapacity12GiB = 12 * GiB;
+
+        private const float MemoryScaleFactor = 0.50f;
+        private ulong _maxCacheMemoryUsage = DefaultTextureSizeCapacity;
 
         private readonly LinkedList<Texture> _textures;
         private ulong _totalSize;
@@ -57,14 +68,53 @@ namespace Ryujinx.Graphics.Gpu.Image
         private readonly Dictionary<TextureDescriptor, ShortTextureCacheEntry> _shortCacheLookup;
 
         /// <summary>
+        /// Initializes the cache, setting the maximum texture capacity for the specified GPU context.
+        /// </summary>
+        /// <remarks>
+        /// If the backend GPU has 0 memory capacity, the cache size defaults to `DefaultTextureSizeCapacity`.
+        /// 
+        /// Reads the current Device total CPU Memory, to determine the maximum amount of Vram available. Capped to 50% of Current GPU Memory.
+        /// </remarks>
+        /// <param name="context">The GPU context that the cache belongs to</param>
+        /// <param name="cpuMemorySize">The amount of physical CPU Memory Avaiable on the device.</param>
+        public void Initialize(GpuContext context, ulong cpuMemorySize)
+        {
+            ulong cpuMemorySizeGiB = cpuMemorySize / GiB;
+
+            if (cpuMemorySizeGiB < 6 || context.Capabilities.MaximumGpuMemory == 0)
+            {
+                _maxCacheMemoryUsage = DefaultTextureSizeCapacity;
+                return;
+            }
+            else if (cpuMemorySizeGiB == 6)
+            {
+                MaxTextureSizeCapacity = TextureSizeCapacity6GiB;
+            }
+            else if (cpuMemorySizeGiB == 8)
+            {
+                MaxTextureSizeCapacity = TextureSizeCapacity8GiB;
+            }
+            else
+            {
+                MaxTextureSizeCapacity = TextureSizeCapacity12GiB;
+            }
+
+            ulong cacheMemory = (ulong)(context.Capabilities.MaximumGpuMemory * MemoryScaleFactor);
+
+            _maxCacheMemoryUsage = Math.Clamp(cacheMemory, MinTextureSizeCapacity, MaxTextureSizeCapacity);
+
+            Logger.Info?.Print(LogClass.Gpu, $"AutoDelete Cache Allocated VRAM : {_maxCacheMemoryUsage / GiB} GiB");
+        }
+
+        /// <summary>
         /// Creates a new instance of the automatic deletion cache.
         /// </summary>
         public AutoDeleteCache()
         {
-            _textures = new LinkedList<Texture>();
+            _textures = [];
 
-            _shortCacheBuilder = new HashSet<ShortTextureCacheEntry>();
-            _shortCache = new HashSet<ShortTextureCacheEntry>();
+            _shortCacheBuilder = [];
+            _shortCache = [];
 
             _shortCacheLookup = new Dictionary<TextureDescriptor, ShortTextureCacheEntry>();
         }
@@ -85,7 +135,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             texture.CacheNode = _textures.AddLast(texture);
 
             if (_textures.Count > MaxCapacity ||
-                (_totalSize > MaxTextureSizeCapacity && _textures.Count >= MinCountForDeletion))
+                (_totalSize > _maxCacheMemoryUsage && _textures.Count >= MinCountForDeletion))
             {
                 RemoveLeastUsedTexture();
             }
@@ -107,11 +157,10 @@ namespace Ryujinx.Graphics.Gpu.Image
                 if (texture.CacheNode != _textures.Last)
                 {
                     _textures.Remove(texture.CacheNode);
-
-                    texture.CacheNode = _textures.AddLast(texture);
+                    _textures.AddLast(texture.CacheNode);
                 }
 
-                if (_totalSize > MaxTextureSizeCapacity && _textures.Count >= MinCountForDeletion)
+                if (_totalSize > _maxCacheMemoryUsage && _textures.Count >= MinCountForDeletion)
                 {
                     RemoveLeastUsedTexture();
                 }
@@ -182,7 +231,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>The texture if found, null otherwise</returns>
         public Texture FindShortCache(in TextureDescriptor descriptor)
         {
-            if (_shortCacheLookup.Count > 0 && _shortCacheLookup.TryGetValue(descriptor, out var entry))
+            if (_shortCacheLookup.Count > 0 && _shortCacheLookup.TryGetValue(descriptor, out ShortTextureCacheEntry entry))
             {
                 if (entry.InvalidatedSequence == entry.Texture.InvalidatedSequence)
                 {
@@ -227,7 +276,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="descriptor">Last used texture descriptor</param>
         public void AddShortCache(Texture texture, ref TextureDescriptor descriptor)
         {
-            var entry = new ShortTextureCacheEntry(descriptor, texture);
+            ShortTextureCacheEntry entry = new(descriptor, texture);
 
             _shortCacheBuilder.Add(entry);
             _shortCacheLookup.Add(entry.Descriptor, entry);
@@ -246,7 +295,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             if (texture.ShortCacheEntry != null)
             {
-                var entry = new ShortTextureCacheEntry(texture);
+                ShortTextureCacheEntry entry = new(texture);
 
                 _shortCacheBuilder.Add(entry);
 
@@ -264,7 +313,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             HashSet<ShortTextureCacheEntry> toRemove = _shortCache;
 
-            foreach (var entry in toRemove)
+            foreach (ShortTextureCacheEntry entry in toRemove)
             {
                 entry.Texture.DecrementReferenceCount();
 

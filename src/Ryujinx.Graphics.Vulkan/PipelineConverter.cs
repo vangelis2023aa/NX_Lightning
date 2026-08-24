@@ -2,27 +2,21 @@ using Ryujinx.Common;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
-using Format = Silk.NET.Vulkan.Format;
+using VulkanFormat = Silk.NET.Vulkan.Format;
+using GALFormat = Ryujinx.Graphics.GAL.Format;
 using PolygonMode = Silk.NET.Vulkan.PolygonMode;
 
 namespace Ryujinx.Graphics.Vulkan
 {
     static class PipelineConverter
     {
-        private const AccessFlags SubpassAccessMask =
-            AccessFlags.MemoryReadBit |
-            AccessFlags.MemoryWriteBit |
-            AccessFlags.ShaderReadBit |
-            AccessFlags.ColorAttachmentWriteBit |
-            AccessFlags.DepthStencilAttachmentWriteBit;
-
         public static unsafe DisposableRenderPass ToRenderPass(this ProgramPipelineState state, VulkanRenderer gd, Device device)
         {
             const int MaxAttachments = Constants.MaxRenderTargets + 1;
 
             AttachmentDescription[] attachmentDescs = null;
 
-            var subpass = new SubpassDescription
+            SubpassDescription subpass = new()
             {
                 PipelineBindPoint = PipelineBindPoint.Graphics,
             };
@@ -30,17 +24,26 @@ namespace Ryujinx.Graphics.Vulkan
             AttachmentReference* attachmentReferences = stackalloc AttachmentReference[MaxAttachments];
 
             Span<int> attachmentIndices = stackalloc int[MaxAttachments];
-            Span<Format> attachmentFormats = stackalloc Format[MaxAttachments];
+            Span<VulkanFormat> attachmentFormats = stackalloc VulkanFormat[MaxAttachments];
 
             int attachmentCount = 0;
             int colorCount = 0;
             int maxColorAttachmentIndex = -1;
 
-            for (int i = 0; i < state.AttachmentEnable.Length; i++)
+            bool isNotMsOrSupportsStorage = gd.Capabilities.SupportsShaderStorageImageMultisample ||
+                 !state.DepthStencilFormat.IsImageCompatible;
+
+            Span<bool> attachmentEnableSpan = state.AttachmentEnable.AsSpan();
+            Span<GALFormat> attachmentFormatsSpan = state.AttachmentFormats.AsSpan();
+
+            for (int i = 0; i < attachmentEnableSpan.Length; i++)
             {
-                if (state.AttachmentEnable[i])
+                if (attachmentEnableSpan[i])
                 {
-                    attachmentFormats[attachmentCount] = gd.FormatCapabilities.ConvertToVkFormat(state.AttachmentFormats[i]);
+                    bool isNotMsOrSupportsStorageAttachments = gd.Capabilities.SupportsShaderStorageImageMultisample ||
+                         !attachmentFormatsSpan[i].IsImageCompatible;
+
+                    attachmentFormats[attachmentCount] = gd.FormatCapabilities.ConvertToVkFormat(attachmentFormatsSpan[i], isNotMsOrSupportsStorageAttachments);
 
                     attachmentIndices[attachmentCount++] = i;
                     colorCount++;
@@ -50,7 +53,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (state.DepthStencilEnable)
             {
-                attachmentFormats[attachmentCount++] = gd.FormatCapabilities.ConvertToVkFormat(state.DepthStencilFormat);
+                attachmentFormats[attachmentCount++] = gd.FormatCapabilities.ConvertToVkFormat(state.DepthStencilFormat, isNotMsOrSupportsStorage);
             }
 
             if (attachmentCount != 0)
@@ -59,7 +62,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                 for (int i = 0; i < attachmentCount; i++)
                 {
-                    int bindIndex = attachmentIndices[i];
+                    //int bindIndex = attachmentIndices[i];
 
                     attachmentDescs[i] = new AttachmentDescription(
                         0,
@@ -108,11 +111,11 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            var subpassDependency = CreateSubpassDependency();
+            SubpassDependency subpassDependency = CreateSubpassDependency(gd);
 
             fixed (AttachmentDescription* pAttachmentDescs = attachmentDescs)
             {
-                var renderPassCreateInfo = new RenderPassCreateInfo
+                RenderPassCreateInfo renderPassCreateInfo = new()
                 {
                     SType = StructureType.RenderPassCreateInfo,
                     PAttachments = pAttachmentDescs,
@@ -123,35 +126,39 @@ namespace Ryujinx.Graphics.Vulkan
                     DependencyCount = 1,
                 };
 
-                gd.Api.CreateRenderPass(device, renderPassCreateInfo, null, out var renderPass).ThrowOnError();
+                gd.Api.CreateRenderPass(device, in renderPassCreateInfo, null, out RenderPass renderPass).ThrowOnError();
 
                 return new DisposableRenderPass(gd.Api, device, renderPass);
             }
         }
 
-        public static SubpassDependency CreateSubpassDependency()
+        public static SubpassDependency CreateSubpassDependency(VulkanRenderer gd)
         {
+            (AccessFlags access, PipelineStageFlags stages) = BarrierBatch.GetSubpassAccessSuperset(gd);
+
             return new SubpassDependency(
                 0,
                 0,
-                PipelineStageFlags.AllGraphicsBit,
-                PipelineStageFlags.AllGraphicsBit,
-                SubpassAccessMask,
-                SubpassAccessMask,
+                stages,
+                stages,
+                access,
+                access,
                 0);
         }
 
-        public unsafe static SubpassDependency2 CreateSubpassDependency2()
+        public unsafe static SubpassDependency2 CreateSubpassDependency2(VulkanRenderer gd)
         {
+            (AccessFlags access, PipelineStageFlags stages) = BarrierBatch.GetSubpassAccessSuperset(gd);
+
             return new SubpassDependency2(
                 StructureType.SubpassDependency2,
                 null,
                 0,
                 0,
-                PipelineStageFlags.AllGraphicsBit,
-                PipelineStageFlags.AllGraphicsBit,
-                SubpassAccessMask,
-                SubpassAccessMask,
+                stages,
+                stages,
+                access,
+                access,
                 0);
         }
 
@@ -180,9 +187,6 @@ namespace Ryujinx.Graphics.Vulkan
             pipeline.LogicOpEnable = state.LogicOpEnable;
             pipeline.LogicOp = state.LogicOp.Convert();
 
-            pipeline.MinDepthBounds = 0f; // Not implemented.
-            pipeline.MaxDepthBounds = 0f; // Not implemented.
-
             pipeline.PatchControlPoints = state.PatchControlPoints;
             pipeline.PolygonMode = PolygonMode.Fill; // Not implemented.
             pipeline.PrimitiveRestartEnable = state.PrimitiveRestartEnable;
@@ -208,17 +212,11 @@ namespace Ryujinx.Graphics.Vulkan
             pipeline.StencilFrontPassOp = state.StencilTest.FrontDpPass.Convert();
             pipeline.StencilFrontDepthFailOp = state.StencilTest.FrontDpFail.Convert();
             pipeline.StencilFrontCompareOp = state.StencilTest.FrontFunc.Convert();
-            pipeline.StencilFrontCompareMask = 0;
-            pipeline.StencilFrontWriteMask = 0;
-            pipeline.StencilFrontReference = 0;
 
             pipeline.StencilBackFailOp = state.StencilTest.BackSFail.Convert();
             pipeline.StencilBackPassOp = state.StencilTest.BackDpPass.Convert();
             pipeline.StencilBackDepthFailOp = state.StencilTest.BackDpFail.Convert();
             pipeline.StencilBackCompareOp = state.StencilTest.BackFunc.Convert();
-            pipeline.StencilBackCompareMask = 0;
-            pipeline.StencilBackWriteMask = 0;
-            pipeline.StencilBackReference = 0;
 
             pipeline.StencilTestEnable = state.StencilTest.TestEnable;
 
@@ -228,13 +226,15 @@ namespace Ryujinx.Graphics.Vulkan
             int vbCount = Math.Min(Constants.MaxVertexBuffers, state.VertexBufferCount);
 
             Span<int> vbScalarSizes = stackalloc int[vbCount];
+            Span<VertexAttribDescriptor> vertexAttribsSpan = state.VertexAttribs.AsSpan();
+            Span<VertexInputAttributeDescription> vertexAttributeDescriptionsSpan = pipeline.Internal.VertexAttributeDescriptions.AsSpan();
 
             for (int i = 0; i < vaCount; i++)
             {
-                var attribute = state.VertexAttribs[i];
-                var bufferIndex = attribute.IsZero ? 0 : attribute.BufferIndex + 1;
+                VertexAttribDescriptor attribute = vertexAttribsSpan[i];
+                int bufferIndex = attribute.IsZero ? 0 : attribute.BufferIndex + 1;
 
-                pipeline.Internal.VertexAttributeDescriptions[i] = new VertexInputAttributeDescription(
+                vertexAttributeDescriptionsSpan[i] = new VertexInputAttributeDescription(
                     (uint)i,
                     (uint)bufferIndex,
                     gd.FormatCapabilities.ConvertToVertexVkFormat(attribute.Format),
@@ -242,20 +242,23 @@ namespace Ryujinx.Graphics.Vulkan
 
                 if (!attribute.IsZero && bufferIndex < vbCount)
                 {
-                    vbScalarSizes[bufferIndex - 1] = Math.Max(attribute.Format.GetScalarSize(), vbScalarSizes[bufferIndex - 1]);
+                    vbScalarSizes[bufferIndex - 1] = Math.Max(attribute.Format.ScalarSize, vbScalarSizes[bufferIndex - 1]);
                 }
             }
 
             int descriptorIndex = 1;
             pipeline.Internal.VertexBindingDescriptions[0] = new VertexInputBindingDescription(0, 0, VertexInputRate.Vertex);
 
+            Span<BufferPipelineDescriptor> vertexBuffersSpan = state.VertexBuffers.AsSpan();
+            Span<VertexInputBindingDescription> vertexBindingDescriptionsSpan = pipeline.Internal.VertexBindingDescriptions.AsSpan();
+            
             for (int i = 0; i < vbCount; i++)
             {
-                var vertexBuffer = state.VertexBuffers[i];
+                BufferPipelineDescriptor vertexBuffer = vertexBuffersSpan[i];
 
                 if (vertexBuffer.Enable)
                 {
-                    var inputRate = vertexBuffer.Divisor != 0 ? VertexInputRate.Instance : VertexInputRate.Vertex;
+                    VertexInputRate inputRate = vertexBuffer.Divisor != 0 ? VertexInputRate.Instance : VertexInputRate.Vertex;
 
                     int alignedStride = vertexBuffer.Stride;
 
@@ -265,7 +268,7 @@ namespace Ryujinx.Graphics.Vulkan
                     }
 
                     // TODO: Support divisor > 1
-                    pipeline.Internal.VertexBindingDescriptions[descriptorIndex++] = new VertexInputBindingDescription(
+                    vertexBindingDescriptionsSpan[descriptorIndex++] = new VertexInputBindingDescription(
                         (uint)i + 1,
                         (uint)alignedStride,
                         inputRate);
@@ -274,15 +277,19 @@ namespace Ryujinx.Graphics.Vulkan
 
             pipeline.VertexBindingDescriptionsCount = (uint)descriptorIndex;
 
+            Span<BlendDescriptor> blendDescriptorsSpan = state.BlendDescriptors.AsSpan();
+            Span<uint> colorWriteMaskSpan = state.ColorWriteMask.AsSpan();
+            Span<PipelineColorBlendAttachmentState> colorBlendAttachmentStateSpan = pipeline.Internal.ColorBlendAttachmentState.AsSpan();
+            
             // NOTE: Viewports, Scissors are dynamic.
 
             for (int i = 0; i < Constants.MaxRenderTargets; i++)
             {
-                var blend = state.BlendDescriptors[i];
+                BlendDescriptor blend = blendDescriptorsSpan[i];
 
-                if (blend.Enable && state.ColorWriteMask[i] != 0)
+                if (blend.Enable && colorWriteMaskSpan[i] != 0)
                 {
-                    pipeline.Internal.ColorBlendAttachmentState[i] = new PipelineColorBlendAttachmentState(
+                    colorBlendAttachmentStateSpan[i] = new PipelineColorBlendAttachmentState(
                         blend.Enable,
                         blend.ColorSrcFactor.Convert(),
                         blend.ColorDstFactor.Convert(),
@@ -290,41 +297,55 @@ namespace Ryujinx.Graphics.Vulkan
                         blend.AlphaSrcFactor.Convert(),
                         blend.AlphaDstFactor.Convert(),
                         blend.AlphaOp.Convert(),
-                        (ColorComponentFlags)state.ColorWriteMask[i]);
+                        (ColorComponentFlags)colorWriteMaskSpan[i]);
                 }
                 else
                 {
-                    pipeline.Internal.ColorBlendAttachmentState[i] = new PipelineColorBlendAttachmentState(
-                        colorWriteMask: (ColorComponentFlags)state.ColorWriteMask[i]);
+                    colorBlendAttachmentStateSpan[i] = new PipelineColorBlendAttachmentState(
+                        colorWriteMask: (ColorComponentFlags)colorWriteMaskSpan[i]);
                 }
             }
 
             int attachmentCount = 0;
             int maxColorAttachmentIndex = -1;
             uint attachmentIntegerFormatMask = 0;
+            bool allFormatsFloatOrSrgb = true;
+            
+            Span<bool> attachmentEnableSpan = state.AttachmentEnable.AsSpan();
+            Span<GALFormat> attachmentFormatsSpan = state.AttachmentFormats.AsSpan();
+            Span<VulkanFormat> pAttachmentFormatsSpan = pipeline.Internal.AttachmentFormats.AsSpan();
 
             for (int i = 0; i < Constants.MaxRenderTargets; i++)
             {
-                if (state.AttachmentEnable[i])
+                if (attachmentEnableSpan[i])
                 {
-                    pipeline.Internal.AttachmentFormats[attachmentCount++] = gd.FormatCapabilities.ConvertToVkFormat(state.AttachmentFormats[i]);
+                    bool isNotMsOrSupportsStorage = gd.Capabilities.SupportsShaderStorageImageMultisample ||
+                         !attachmentFormatsSpan[i].IsImageCompatible;
+
+                    pAttachmentFormatsSpan[attachmentCount++] = gd.FormatCapabilities.ConvertToVkFormat(attachmentFormatsSpan[i], isNotMsOrSupportsStorage);
                     maxColorAttachmentIndex = i;
 
-                    if (state.AttachmentFormats[i].IsInteger())
+                    if (attachmentFormatsSpan[i].IsInt)
                     {
                         attachmentIntegerFormatMask |= 1u << i;
                     }
+
+                    allFormatsFloatOrSrgb &= attachmentFormatsSpan[i].IsFloatOrSrgb;
                 }
             }
 
             if (state.DepthStencilEnable)
             {
-                pipeline.Internal.AttachmentFormats[attachmentCount++] = gd.FormatCapabilities.ConvertToVkFormat(state.DepthStencilFormat);
+                bool isNotMsOrSupportsStorage = !state.DepthStencilFormat.IsImageCompatible ||
+                     gd.Capabilities.SupportsShaderStorageImageMultisample;
+
+                pAttachmentFormatsSpan[attachmentCount++] = gd.FormatCapabilities.ConvertToVkFormat(state.DepthStencilFormat, isNotMsOrSupportsStorage);
             }
 
             pipeline.ColorBlendAttachmentStateCount = (uint)(maxColorAttachmentIndex + 1);
             pipeline.VertexAttributeDescriptionsCount = (uint)Math.Min(Constants.MaxVertexAttributes, state.VertexAttribCount);
             pipeline.Internal.AttachmentIntegerFormatMask = attachmentIntegerFormatMask;
+            pipeline.Internal.LogicOpsAllowed = attachmentCount == 0 || !allFormatsFloatOrSrgb;
 
             return pipeline;
         }

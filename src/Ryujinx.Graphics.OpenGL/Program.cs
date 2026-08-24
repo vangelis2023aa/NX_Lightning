@@ -13,6 +13,7 @@ namespace Ryujinx.Graphics.OpenGL
         private const int MaxShaderLogLength = 2048;
 
         public int Handle { get; private set; }
+        public bool CanBindWhileIncomplete => false;
 
         public bool IsLinked
         {
@@ -30,7 +31,6 @@ namespace Ryujinx.Graphics.OpenGL
         private ProgramLinkStatus _status = ProgramLinkStatus.Incomplete;
         private int[] _shaderHandles;
 
-        public bool HasFragmentShader;
         public int FragmentOutputMap { get; }
 
         public Program(ShaderSource[] shaders, int fragmentOutputMap)
@@ -40,6 +40,7 @@ namespace Ryujinx.Graphics.OpenGL
             GL.ProgramParameter(Handle, ProgramParameterName.ProgramBinaryRetrievableHint, 1);
 
             _shaderHandles = new int[shaders.Length];
+            bool hasFragmentShader = false;
 
             for (int index = 0; index < shaders.Length; index++)
             {
@@ -47,7 +48,7 @@ namespace Ryujinx.Graphics.OpenGL
 
                 if (shader.Stage == ShaderStage.Fragment)
                 {
-                    HasFragmentShader = true;
+                    hasFragmentShader = true;
                 }
 
                 int shaderHandle = GL.CreateShader(shader.Stage.Convert());
@@ -71,7 +72,7 @@ namespace Ryujinx.Graphics.OpenGL
 
             GL.LinkProgram(Handle);
 
-            FragmentOutputMap = fragmentOutputMap;
+            FragmentOutputMap = hasFragmentShader ? fragmentOutputMap : 0;
         }
 
         public Program(ReadOnlySpan<byte> code, bool hasFragmentShader, int fragmentOutputMap)
@@ -86,13 +87,12 @@ namespace Ryujinx.Graphics.OpenGL
                 {
                     fixed (byte* ptr = code)
                     {
-                        GL.ProgramBinary(Handle, binaryFormat, (IntPtr)ptr, code.Length - 4);
+                        GL.ProgramBinary(Handle, binaryFormat, (nint)ptr, code.Length - 4);
                     }
                 }
             }
 
-            HasFragmentShader = hasFragmentShader;
-            FragmentOutputMap = fragmentOutputMap;
+            FragmentOutputMap = hasFragmentShader ? fragmentOutputMap : 0;
         }
 
         public void Bind()

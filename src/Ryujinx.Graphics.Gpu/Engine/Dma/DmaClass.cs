@@ -1,6 +1,8 @@
 using Ryujinx.Common;
+using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.Gpu.Engine.Threed;
+using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Texture;
 using System;
@@ -190,7 +192,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
         /// <param name="argument">The LaunchDma call argument</param>
         private void DmaCopy(int argument)
         {
-            var memoryManager = _channel.MemoryManager;
+            MemoryManager memoryManager = _channel.MemoryManager;
 
             CopyFlags copyFlags = (CopyFlags)argument;
 
@@ -225,8 +227,8 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                 int srcBpp = remap ? srcComponents * componentSize : 1;
                 int dstBpp = remap ? dstComponents * componentSize : 1;
 
-                var dst = Unsafe.As<uint, DmaTexture>(ref _state.State.SetDstBlockSize);
-                var src = Unsafe.As<uint, DmaTexture>(ref _state.State.SetSrcBlockSize);
+                DmaTexture dst = Unsafe.As<uint, DmaTexture>(ref _state.State.SetDstBlockSize);
+                DmaTexture src = Unsafe.As<uint, DmaTexture>(ref _state.State.SetSrcBlockSize);
 
                 int srcRegionX = 0, srcRegionY = 0, dstRegionX = 0, dstRegionY = 0;
 
@@ -245,7 +247,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                 int srcStride = (int)_state.State.PitchIn;
                 int dstStride = (int)_state.State.PitchOut;
 
-                var srcCalculator = new OffsetCalculator(
+                OffsetCalculator srcCalculator = new(
                     src.Width,
                     src.Height,
                     srcStride,
@@ -254,7 +256,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                     src.MemoryLayout.UnpackGobBlocksInZ(),
                     srcBpp);
 
-                var dstCalculator = new OffsetCalculator(
+                OffsetCalculator dstCalculator = new(
                     dst.Width,
                     dst.Height,
                     dstStride,
@@ -276,18 +278,70 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                     dstBaseOffset += dstStride * (yCount - 1);
                 }
 
-                ReadOnlySpan<byte> srcSpan = memoryManager.GetSpan(srcGpuVa + (ulong)srcBaseOffset, srcSize, true);
+                // If remapping is disabled, we always copy the components directly, in order.
+                // If it's enabled, but the mapping is just XYZW, we also copy them in order.
+                bool isIdentityRemap = !remap ||
+                    (_state.State.SetRemapComponentsDstX == SetRemapComponentsDst.SrcX &&
+                    (dstComponents < 2 || _state.State.SetRemapComponentsDstY == SetRemapComponentsDst.SrcY) &&
+                    (dstComponents < 3 || _state.State.SetRemapComponentsDstZ == SetRemapComponentsDst.SrcZ) &&
+                    (dstComponents < 4 || _state.State.SetRemapComponentsDstW == SetRemapComponentsDst.SrcW));
 
                 bool completeSource = IsTextureCopyComplete(src, srcLinear, srcBpp, srcStride, xCount, yCount);
                 bool completeDest = IsTextureCopyComplete(dst, dstLinear, dstBpp, dstStride, xCount, yCount);
+
+                // Check if the source texture exists on the GPU, if it does, do a GPU side copy.
+                // Otherwise, we would need to flush the source texture which is costly.
+                // We don't expect the source to be linear in such cases, as linear source usually indicates buffer or CPU written data.
+
+                if (completeSource && completeDest && !srcLinear && isIdentityRemap)
+                {
+                    Image.Texture source = memoryManager.Physical.TextureCache.FindTexture(
+                        memoryManager,
+                        srcGpuVa,
+                        srcBpp,
+                        srcStride,
+                        src.Height,
+                        xCount,
+                        yCount,
+                        srcLinear,
+                        src.MemoryLayout.UnpackGobBlocksInY(),
+                        src.MemoryLayout.UnpackGobBlocksInZ());
+
+                    if (source != null && source.Height == yCount && source.Info.FormatInfo.Format is not (Format.R32G32B32A32Float or Format.R16G16B16A16Float))
+                    {
+                        source.SynchronizeMemory();
+
+                        Image.Texture target = memoryManager.Physical.TextureCache.FindOrCreateTexture(
+                            memoryManager,
+                            source.Info.FormatInfo,
+                            dstGpuVa,
+                            xCount,
+                            yCount,
+                            dstStride,
+                            dstLinear,
+                            dst.MemoryLayout.UnpackGobBlocksInY(),
+                            dst.MemoryLayout.UnpackGobBlocksInZ());
+
+                        if (source.ScaleFactor != target.ScaleFactor)
+                        {
+                            target.PropagateScale(source);
+                        }
+
+                        source.HostTexture.CopyTo(target.HostTexture, 0, 0);
+                        target.SignalModified();
+                        return;
+                    }
+                }
+
+                ReadOnlySpan<byte> srcSpan = memoryManager.GetSpan(srcGpuVa + (ulong)srcBaseOffset, srcSize, true);
 
                 // Try to set the texture data directly,
                 // but only if we are doing a complete copy,
                 // and not for block linear to linear copies, since those are typically accessed from the CPU.
 
-                if (completeSource && completeDest && !(dstLinear && !srcLinear))
+                if (completeSource && completeDest && !(dstLinear && !srcLinear) && isIdentityRemap)
                 {
-                    var target = memoryManager.Physical.TextureCache.FindTexture(
+                    Image.Texture target = memoryManager.Physical.TextureCache.FindTexture(
                         memoryManager,
                         dstGpuVa,
                         dstBpp,
@@ -301,7 +355,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
 
                     if (target != null)
                     {
-                        IMemoryOwner<byte> data;
+                        MemoryOwner<byte> data;
                         if (srcLinear)
                         {
                             data = LayoutConverter.ConvertLinearStridedToLinear(
@@ -353,14 +407,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
 
                 TextureParams srcParams = new(srcRegionX, srcRegionY, srcBaseOffset, srcBpp, srcLinear, srcCalculator);
                 TextureParams dstParams = new(dstRegionX, dstRegionY, dstBaseOffset, dstBpp, dstLinear, dstCalculator);
-
-                // If remapping is enabled, we always copy the components directly, in order.
-                // If it's enabled, but the mapping is just XYZW, we also copy them in order.
-                bool isIdentityRemap = !remap ||
-                    (_state.State.SetRemapComponentsDstX == SetRemapComponentsDst.SrcX &&
-                    (dstComponents < 2 || _state.State.SetRemapComponentsDstY == SetRemapComponentsDst.SrcY) &&
-                    (dstComponents < 3 || _state.State.SetRemapComponentsDstZ == SetRemapComponentsDst.SrcZ) &&
-                    (dstComponents < 4 || _state.State.SetRemapComponentsDstW == SetRemapComponentsDst.SrcW));
 
                 if (isIdentityRemap)
                 {

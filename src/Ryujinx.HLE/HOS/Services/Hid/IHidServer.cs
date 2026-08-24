@@ -13,7 +13,7 @@ using System.Runtime.InteropServices;
 namespace Ryujinx.HLE.HOS.Services.Hid
 {
     [Service("hid")]
-    class IHidServer : IpcService
+    partial class IHidServer : IpcService
     {
         private readonly KEvent _xpadIdEvent;
         private readonly KEvent _palmaOperationCompleteEvent;
@@ -22,6 +22,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
 
         private bool _sixAxisSensorFusionEnabled;
         private bool _unintendedHomeButtonInputProtectionEnabled;
+        private bool _npadAnalogStickCenterClampEnabled;
         private bool _vibrationPermitted;
         private bool _usbFullKeyControllerEnabled;
         private readonly bool _isFirmwareUpdateAvailableForSixAxisSensor;
@@ -123,6 +124,26 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
             {
                 context.Device.Hid.Mouse.Update(0, 0);
+            }
+
+            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(26)]
+        // ActivateDebugMouse(nn::applet::AppletResourceUserId)
+        public ResultCode ActivateDebugMouse(ServiceCtx context)
+        {
+            long appletResourceUserId = context.RequestData.ReadInt64();
+
+            context.Device.Hid.DebugMouse.Active = true;
+
+            // Initialize entries to avoid issues with some games.
+
+            for (int entry = 0; entry < Hid.SharedMemEntryCount; entry++)
+            {
+                context.Device.Hid.DebugMouse.Update();
             }
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId });
@@ -581,19 +602,33 @@ namespace Ryujinx.HLE.HOS.Services.Hid
         }
 
         [CommandCmif(82)]
-        // IsSixAxisSensorAtRest(nn::hid::SixAxisSensorHandle, nn::applet::AppletResourceUserId) -> bool IsAsRest
+        // IsSixAxisSensorAtRest(nn::hid::SixAxisSensorHandle, nn::applet::AppletResourceUserId) -> bool IsAtRest
         public ResultCode IsSixAxisSensorAtRest(ServiceCtx context)
         {
             int sixAxisSensorHandle = context.RequestData.ReadInt32();
+            
+            // 4 byte struct w/ 4-byte alignment
+            
+            // uint typeValue = (uint) sixAxisSensorHandle;                 // 0x0 	0x4 	TypeValue
+            // uint npadStyleIndex = (uint) sixAxisSensorHandle & 0xff;     // 0x0 	0x1 	NpadStyleIndex
+            int playerNumber = (sixAxisSensorHandle << 8) & 0xff;           // 0x1 	0x1 	PlayerNumber
+            // uint deviceIdx= ((uint) sixAxisSensorHandle << 16) & 0xff;   // 0x2 	0x1 	DeviceIdx 
+            // uint unknown = ((uint) sixAxisSensorHandle << 24) & 0xff;
+            
+            // 32bit sign extension padding -> if = 0, + offset, else - offset
+            
+            // npadStyleIndex = ((npadStyleIndex & 0x8000) == 0) ? npadStyleIndex | 0xFFFF0000 : npadStyleIndex & 0xFFFF0000;
+            // playerNumber = ((playerNumber & 0x8000) == 0) ? playerNumber | 0xFFFF0000 : playerNumber & 0xFFFF0000;
+            // deviceIdx = ((deviceIdx & 0x8000) == 0) ? deviceIdx | 0xFFFF0000 : deviceIdx & 0xFFFF0000;
+            // unknown = ((unknown & 0x8000) == 0) ? unknown | 0xFFFF0000 : unknown & 0xFFFF0000;
+            
             context.RequestData.BaseStream.Position += 4; // Padding
             long appletResourceUserId = context.RequestData.ReadInt64();
-
-            bool isAtRest = true;
-
-            context.ResponseData.Write(isAtRest);
-
-            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId, sixAxisSensorHandle, isAtRest });
-
+            
+            // TODO: link to context.Device.Hid.Npads.SixAxisActive when properly implemented
+            // We currently do not support stopping or starting SixAxisTracking.
+            
+            context.ResponseData.Write(context.Device.Hid.Npads.isAtRest(playerNumber));
             return ResultCode.Success;
         }
 
@@ -608,7 +643,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             context.ResponseData.Write(_isFirmwareUpdateAvailableForSixAxisSensor);
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId, sixAxisSensorHandle, _isFirmwareUpdateAvailableForSixAxisSensor });
-
+            
             return ResultCode.Success;
         }
 
@@ -678,6 +713,18 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             int unknown0 = context.RequestData.ReadInt32();
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId, unknown0 });
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(92)]
+        // SetGestureOutputRanges(pid, ushort Unknown0)
+        public ResultCode SetGestureOutputRanges(ServiceCtx context)
+        {
+            ulong pid = context.Request.HandleDesc.PId;
+            ushort unknown0 = context.RequestData.ReadUInt16();
+
+            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { pid, unknown0 });
 
             return ResultCode.Success;
         }
@@ -839,8 +886,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid
 
             // Initialize entries to avoid issues with some games.
 
-            List<GamepadInput> emptyGamepadInputs = new();
-            List<SixAxisInput> emptySixAxisInputs = new();
+            List<GamepadInput> emptyGamepadInputs = [];
+            List<SixAxisInput> emptySixAxisInputs = [];
 
             for (int player = 0; player < NpadDevices.MaxControllers; player++)
             {
@@ -1107,6 +1154,19 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             //       If not, it returns nothing.
         }
 
+        [CommandCmif(134)] // 6.1.0+
+        // SetNpadUseAnalogStickUseCenterClamp(bool Enable, nn::applet::AppletResourceUserId)
+        public ResultCode SetNpadUseAnalogStickUseCenterClamp(ServiceCtx context)
+        {
+            ulong pid = context.RequestData.ReadUInt64();
+            _npadAnalogStickCenterClampEnabled = context.RequestData.ReadUInt32() != 0;
+            long appletResourceUserId = context.RequestData.ReadInt64();
+
+            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { pid, appletResourceUserId, _npadAnalogStickCenterClampEnabled });
+
+            return ResultCode.Success;
+        }
+
         [CommandCmif(200)]
         // GetVibrationDeviceInfo(nn::hid::VibrationDeviceHandle) -> nn::hid::VibrationDeviceInfo
         public ResultCode GetVibrationDeviceInfo(ServiceCtx context)
@@ -1115,59 +1175,54 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             NpadStyleIndex deviceType = (NpadStyleIndex)deviceHandle.DeviceType;
             NpadIdType npadIdType = (NpadIdType)deviceHandle.PlayerId;
 
-            if (deviceType < NpadStyleIndex.System || deviceType >= NpadStyleIndex.FullKey)
+            if (!HidUtils.IsValidNpadIdType(npadIdType))
             {
-                if (!HidUtils.IsValidNpadIdType(npadIdType))
-                {
-                    return ResultCode.InvalidNpadIdType;
-                }
-
-                if (deviceHandle.Position > 1)
-                {
-                    return ResultCode.InvalidDeviceIndex;
-                }
-
-                VibrationDeviceType vibrationDeviceType = VibrationDeviceType.None;
-
-                if (Enum.IsDefined(deviceType))
-                {
-                    vibrationDeviceType = VibrationDeviceType.LinearResonantActuator;
-                }
-                else if ((uint)deviceType == 8)
-                {
-                    vibrationDeviceType = VibrationDeviceType.GcErm;
-                }
-
-                VibrationDevicePosition vibrationDevicePosition = VibrationDevicePosition.None;
-
-                if (vibrationDeviceType == VibrationDeviceType.LinearResonantActuator)
-                {
-                    if (deviceHandle.Position == 0)
-                    {
-                        vibrationDevicePosition = VibrationDevicePosition.Left;
-                    }
-                    else if (deviceHandle.Position == 1)
-                    {
-                        vibrationDevicePosition = VibrationDevicePosition.Right;
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException($"{nameof(deviceHandle.Position)} contains an invalid value: {deviceHandle.Position}");
-                    }
-                }
-
-                VibrationDeviceValue deviceInfo = new()
-                {
-                    DeviceType = vibrationDeviceType,
-                    Position = vibrationDevicePosition,
-                };
-
-                context.ResponseData.WriteStruct(deviceInfo);
-
-                return ResultCode.Success;
+                return ResultCode.InvalidNpadIdType;
             }
 
-            return ResultCode.InvalidNpadDeviceType;
+            if (deviceHandle.Position > 1)
+            {
+                return ResultCode.InvalidDeviceIndex;
+            }
+
+            VibrationDeviceType vibrationDeviceType = VibrationDeviceType.None;
+
+            if (Enum.IsDefined(deviceType))
+            {
+                vibrationDeviceType = VibrationDeviceType.LinearResonantActuator;
+            }
+            else if ((uint)deviceType == 8)
+            {
+                vibrationDeviceType = VibrationDeviceType.GcErm;
+            }
+
+            VibrationDevicePosition vibrationDevicePosition = VibrationDevicePosition.None;
+
+            if (vibrationDeviceType == VibrationDeviceType.LinearResonantActuator)
+            {
+                if (deviceHandle.Position == 0)
+                {
+                    vibrationDevicePosition = VibrationDevicePosition.Left;
+                }
+                else if (deviceHandle.Position == 1)
+                {
+                    vibrationDevicePosition = VibrationDevicePosition.Right;
+                }
+                else
+                {
+                    throw new InvalidOperationException($"{nameof(deviceHandle.Position)} contains an invalid value: {deviceHandle.Position}");
+                }
+            }
+
+            VibrationDeviceValue deviceInfo = new()
+            {
+                DeviceType = vibrationDeviceType,
+                Position = vibrationDevicePosition,
+            };
+
+            context.ResponseData.WriteStruct(deviceInfo);
+
+            return ResultCode.Success;
         }
 
         [CommandCmif(201)]
@@ -1275,8 +1330,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid
 
             context.Memory.Read(context.Request.PtrBuff[1].Position, vibrationValueBuffer);
 
-            Span<VibrationDeviceHandle> deviceHandles = MemoryMarshal.Cast<byte, VibrationDeviceHandle>(vibrationDeviceHandleBuffer);
-            Span<VibrationValue> vibrationValues = MemoryMarshal.Cast<byte, VibrationValue>(vibrationValueBuffer);
+            Span<VibrationDeviceHandle> deviceHandles = MemoryMarshal.Cast<byte, VibrationDeviceHandle>(new Span<byte>(vibrationDeviceHandleBuffer));
+            Span<VibrationValue> vibrationValues = MemoryMarshal.Cast<byte, VibrationValue>(new Span<byte>(vibrationValueBuffer));
 
             if (!deviceHandles.IsEmpty && vibrationValues.Length == deviceHandles.Length)
             {
@@ -1818,6 +1873,19 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             long appletResourceUserId = context.RequestData.ReadInt64();
 
             Logger.Stub?.PrintStub(LogClass.ServiceHid, new { appletResourceUserId, touchScreenConfigurationForNx });
+
+            return ResultCode.Success;
+        }
+
+        [CommandCmif(1004)] // 17.0.0+
+        // SetTouchScreenResolution(int width, int height, nn::applet::AppletResourceUserId)
+        public ResultCode SetTouchScreenResolution(ServiceCtx context)
+        {
+            int width = context.RequestData.ReadInt32();
+            int height = context.RequestData.ReadInt32();
+            long appletResourceUserId = context.RequestData.ReadInt64();
+
+            Logger.Stub?.PrintStub(LogClass.ServiceHid, new { width, height, appletResourceUserId });
 
             return ResultCode.Success;
         }

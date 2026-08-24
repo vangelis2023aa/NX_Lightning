@@ -9,13 +9,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
     partial class KScheduler : IDisposable
     {
         public const int PrioritiesCount = 64;
-        public const int CpuCoresCount = 4;
+        public static int CpuCoresCount;
 
         private const int RoundRobinTimeQuantumMs = 10;
 
-        private static readonly int[] _preemptionPriorities = { 59, 59, 59, 63 };
-
-        private static readonly int[] _srcCoresHighestPrioThreads = new int[CpuCoresCount];
+        private static int[] _srcCoresHighestPrioThreads;
 
         private readonly KernelContext _context;
         private readonly int _coreId;
@@ -28,42 +26,32 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
 
         private SchedulingState _state;
 
-        private AutoResetEvent _idleInterruptEvent;
-        private readonly object _idleInterruptEventLock;
-
         private KThread _previousThread;
         private KThread _currentThread;
-        private readonly KThread _idleThread;
+
+        private int _coreIdleLock;
+        private bool _idleSignalled = true;
+        private bool _idleActive = true;
+        private long _idleTimeRunning;
 
         public KThread PreviousThread => _previousThread;
         public KThread CurrentThread => _currentThread;
         public long LastContextSwitchTime { get; private set; }
-        public long TotalIdleTimeTicks => _idleThread.TotalTimeRunning;
+        public long TotalIdleTimeTicks => _idleTimeRunning;
 
         public KScheduler(KernelContext context, int coreId)
         {
             _context = context;
             _coreId = coreId;
 
-            _idleInterruptEvent = new AutoResetEvent(false);
-            _idleInterruptEventLock = new object();
+            _currentThread = null;
 
-            KThread idleThread = CreateIdleThread(context, coreId);
-
-            _currentThread = idleThread;
-            _idleThread = idleThread;
-
-            idleThread.StartHostThread();
-            idleThread.SchedulerWaitEvent.Set();
+            _srcCoresHighestPrioThreads ??= new int[CpuCoresCount];
         }
 
-        private KThread CreateIdleThread(KernelContext context, int cpuCore)
+        private static int PreemptionPriorities(int index)
         {
-            KThread idleThread = new(context);
-
-            idleThread.Initialize(0UL, 0UL, 0UL, PrioritiesCount, cpuCore, null, ThreadType.Dummy, IdleThreadLoop);
-
-            return idleThread;
+            return index == CpuCoresCount - 1 ? 63 : 59;
         }
 
         public static ulong SelectThreads(KernelContext context)
@@ -186,10 +174,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
 
             if (previousThread != nextThread)
             {
-                if (previousThread != null)
-                {
-                    previousThread.LastScheduledTime = PerformanceCounter.ElapsedTicks;
-                }
+                previousThread?.LastScheduledTime = PerformanceCounter.ElapsedTicks;
 
                 _state.SelectedThread = nextThread;
                 _state.NeedsScheduling = true;
@@ -237,39 +222,64 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
                 KThread threadToSignal = context.Schedulers[coreToSignal]._currentThread;
 
                 // Request the thread running on that core to stop and reschedule, if we have one.
-                if (threadToSignal != context.Schedulers[coreToSignal]._idleThread)
-                {
-                    threadToSignal.Context.RequestInterrupt();
-                }
+                threadToSignal?.Context.RequestInterrupt();
 
                 // If the core is idle, ensure that the idle thread is awaken.
-                context.Schedulers[coreToSignal]._idleInterruptEvent.Set();
+                context.Schedulers[coreToSignal].NotifyIdleThread();
 
                 scheduledCoresMask &= ~(1UL << coreToSignal);
             }
         }
 
-        private void IdleThreadLoop()
+        private void ActivateIdleThread()
         {
-            while (_context.Running)
+            while (Interlocked.CompareExchange(ref _coreIdleLock, 1, 0) != 0)
+            {
+                Thread.SpinWait(1);
+            }
+
+            Thread.MemoryBarrier();
+
+            // Signals that idle thread is now active on this core.
+            _idleActive = true;
+
+            TryLeaveIdle();
+
+            Interlocked.Exchange(ref _coreIdleLock, 0);
+        }
+
+        private void NotifyIdleThread()
+        {
+            while (Interlocked.CompareExchange(ref _coreIdleLock, 1, 0) != 0)
+            {
+                Thread.SpinWait(1);
+            }
+
+            Thread.MemoryBarrier();
+
+            // Signals that the idle core may be able to exit idle.
+            _idleSignalled = true;
+
+            TryLeaveIdle();
+
+            Interlocked.Exchange(ref _coreIdleLock, 0);
+        }
+
+        public void TryLeaveIdle()
+        {
+            if (_idleSignalled && _idleActive)
             {
                 _state.NeedsScheduling = false;
                 Thread.MemoryBarrier();
-                KThread nextThread = PickNextThread(_state.SelectedThread);
+                KThread nextThread = PickNextThread(null, _state.SelectedThread);
 
-                if (_idleThread != nextThread)
+                if (nextThread != null)
                 {
-                    _idleThread.SchedulerWaitEvent.Reset();
-                    WaitHandle.SignalAndWait(nextThread.SchedulerWaitEvent, _idleThread.SchedulerWaitEvent);
+                    _idleActive = false;
+                    nextThread.SchedulerWaitEvent.Set();
                 }
 
-                _idleInterruptEvent.WaitOne();
-            }
-
-            lock (_idleInterruptEventLock)
-            {
-                _idleInterruptEvent.Dispose();
-                _idleInterruptEvent = null;
+                _idleSignalled = false;
             }
         }
 
@@ -280,6 +290,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
             KThread currentThread = KernelStatic.GetCurrentThread();
             KThread selectedThread = _state.SelectedThread;
 
+            if (!currentThread.IsThreadNamed && !string.IsNullOrEmpty(currentThread.GetThreadName()))
+            {
+                currentThread.HostThread.Name = $"<{currentThread.GetThreadName()}>";
+                currentThread.IsThreadNamed = true;
+            }
+
             // If the thread is already scheduled and running on the core, we have nothing to do.
             if (currentThread == selectedThread)
             {
@@ -288,24 +304,43 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
 
             currentThread.SchedulerWaitEvent.Reset();
             currentThread.ThreadContext.Unlock();
+            currentThread.DebugHalt.Set();
 
             // Wake all the threads that might be waiting until this thread context is unlocked.
             for (int core = 0; core < CpuCoresCount; core++)
             {
-                _context.Schedulers[core]._idleInterruptEvent.Set();
+                _context.Schedulers[core].NotifyIdleThread();
             }
 
-            KThread nextThread = PickNextThread(selectedThread);
+            KThread nextThread = PickNextThread(KernelStatic.GetCurrentThread(), selectedThread);
 
             if (currentThread.Context.Running)
             {
                 // Wait until this thread is scheduled again, and allow the next thread to run.
-                WaitHandle.SignalAndWait(nextThread.SchedulerWaitEvent, currentThread.SchedulerWaitEvent);
+
+                if (nextThread == null)
+                {
+                    ActivateIdleThread();
+                    currentThread.SchedulerWaitEvent.Wait();
+                }
+                else
+                {
+                    nextThread.SchedulerWaitEvent.Set();
+                    currentThread.SchedulerWaitEvent.Wait();
+                }
             }
             else
             {
                 // Allow the next thread to run.
-                nextThread.SchedulerWaitEvent.Set();
+
+                if (nextThread == null)
+                {
+                    ActivateIdleThread();
+                }
+                else
+                {
+                    nextThread.SchedulerWaitEvent.Set();
+                }
 
                 // We don't need to wait since the thread is exiting, however we need to
                 // make sure this thread will never call the scheduler again, since it is
@@ -319,7 +354,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
             }
         }
 
-        private KThread PickNextThread(KThread selectedThread)
+        private KThread PickNextThread(KThread currentThread, KThread selectedThread)
         {
             while (true)
             {
@@ -335,7 +370,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
                     // on the core, as the scheduled thread will handle the next switch.
                     if (selectedThread.ThreadContext.Lock())
                     {
-                        SwitchTo(selectedThread);
+                        SwitchTo(currentThread, selectedThread);
 
                         if (!_state.NeedsScheduling)
                         {
@@ -346,15 +381,15 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
                     }
                     else
                     {
-                        return _idleThread;
+                        return null;
                     }
                 }
                 else
                 {
                     // The core is idle now, make sure that the idle thread can run
                     // and switch the core when a thread is available.
-                    SwitchTo(null);
-                    return _idleThread;
+                    SwitchTo(currentThread, null);
+                    return null;
                 }
 
                 _state.NeedsScheduling = false;
@@ -363,12 +398,9 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
             }
         }
 
-        private void SwitchTo(KThread nextThread)
+        private void SwitchTo(KThread currentThread, KThread nextThread)
         {
-            KProcess currentProcess = KernelStatic.GetCurrentProcess();
-            KThread currentThread = KernelStatic.GetCurrentThread();
-
-            nextThread ??= _idleThread;
+            KProcess currentProcess = currentThread?.Owner;
 
             if (currentThread != nextThread)
             {
@@ -376,7 +408,14 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
                 long currentTicks = PerformanceCounter.ElapsedTicks;
                 long ticksDelta = currentTicks - previousTicks;
 
-                currentThread.AddCpuTime(ticksDelta);
+                if (currentThread == null)
+                {
+                    Interlocked.Add(ref _idleTimeRunning, ticksDelta);
+                }
+                else
+                {
+                    currentThread.AddCpuTime(ticksDelta);
+                }
 
                 currentProcess?.AddCpuTime(ticksDelta);
 
@@ -386,13 +425,13 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
                 {
                     _previousThread = !currentThread.TerminationRequested && currentThread.ActiveCore == _coreId ? currentThread : null;
                 }
-                else if (currentThread == _idleThread)
+                else if (currentThread == null)
                 {
                     _previousThread = null;
                 }
             }
 
-            if (nextThread.CurrentCore != _coreId)
+            if (nextThread != null && nextThread.CurrentCore != _coreId)
             {
                 nextThread.CurrentCore = _coreId;
             }
@@ -408,7 +447,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
 
                 for (int core = 0; core < CpuCoresCount; core++)
                 {
-                    RotateScheduledQueue(context, core, _preemptionPriorities[core]);
+                    RotateScheduledQueue(context, core, PreemptionPriorities(core));
                 }
 
                 context.CriticalSection.Leave();
@@ -543,7 +582,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
                     {
                         KThread selectedSuggestedCore = context.Schedulers[suggestedCore]._state.SelectedThread;
 
-                        if (selectedSuggestedCore == suggested || (selectedSuggestedCore != null && selectedSuggestedCore.DynamicPriority < 2))
+                        if (selectedSuggestedCore == suggested || selectedSuggestedCore is { DynamicPriority: < 2 })
                         {
                             continue;
                         }
@@ -645,11 +684,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
 
         public void Dispose()
         {
-            // Ensure that the idle thread is not blocked and can exit.
-            lock (_idleInterruptEventLock)
-            {
-                _idleInterruptEvent?.Set();
-            }
+            // No resources to dispose for now.
         }
     }
 }

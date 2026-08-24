@@ -1,7 +1,8 @@
 using Ryujinx.Common;
-using Ryujinx.Graphics.Gpu.Memory;
+using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.Texture;
 using Ryujinx.Graphics.Video;
+using Ryujinx.Memory;
 using System;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -12,11 +13,11 @@ namespace Ryujinx.Graphics.Nvdec.Image
 {
     static class SurfaceWriter
     {
-        public static void Write(MemoryManager gmm, ISurface surface, uint lumaOffset, uint chromaOffset)
+        public static void Write(DeviceMemoryManager mm, ISurface surface, uint lumaOffset, uint chromaOffset)
         {
             int lumaSize = GetBlockLinearSize(surface.Width, surface.Height, 1);
 
-            using var luma = gmm.GetWritableRegion(ExtendOffset(lumaOffset), lumaSize);
+            using WritableRegion luma = mm.GetWritableRegion(ExtendOffset(lumaOffset), lumaSize);
 
             WriteLuma(
                 luma.Memory.Span,
@@ -27,7 +28,7 @@ namespace Ryujinx.Graphics.Nvdec.Image
 
             int chromaSize = GetBlockLinearSize(surface.UvWidth, surface.UvHeight, 2);
 
-            using var chroma = gmm.GetWritableRegion(ExtendOffset(chromaOffset), chromaSize);
+            using WritableRegion chroma = mm.GetWritableRegion(ExtendOffset(chromaOffset), chromaSize);
 
             WriteChroma(
                 chroma.Memory.Span,
@@ -39,7 +40,7 @@ namespace Ryujinx.Graphics.Nvdec.Image
         }
 
         public static void WriteInterlaced(
-            MemoryManager gmm,
+            DeviceMemoryManager mm,
             ISurface surface,
             uint lumaTopOffset,
             uint chromaTopOffset,
@@ -48,8 +49,8 @@ namespace Ryujinx.Graphics.Nvdec.Image
         {
             int lumaSize = GetBlockLinearSize(surface.Width, surface.Height / 2, 1);
 
-            using var lumaTop = gmm.GetWritableRegion(ExtendOffset(lumaTopOffset), lumaSize);
-            using var lumaBottom = gmm.GetWritableRegion(ExtendOffset(lumaBottomOffset), lumaSize);
+            using WritableRegion lumaTop = mm.GetWritableRegion(ExtendOffset(lumaTopOffset), lumaSize);
+            using WritableRegion lumaBottom = mm.GetWritableRegion(ExtendOffset(lumaBottomOffset), lumaSize);
 
             WriteLuma(
                 lumaTop.Memory.Span,
@@ -67,8 +68,8 @@ namespace Ryujinx.Graphics.Nvdec.Image
 
             int chromaSize = GetBlockLinearSize(surface.UvWidth, surface.UvHeight / 2, 2);
 
-            using var chromaTop = gmm.GetWritableRegion(ExtendOffset(chromaTopOffset), chromaSize);
-            using var chromaBottom = gmm.GetWritableRegion(ExtendOffset(chromaBottomOffset), chromaSize);
+            using WritableRegion chromaTop = mm.GetWritableRegion(ExtendOffset(chromaTopOffset), chromaSize);
+            using WritableRegion chromaBottom = mm.GetWritableRegion(ExtendOffset(chromaBottomOffset), chromaSize);
 
             WriteChroma(
                 chromaTop.Memory.Span,

@@ -1,7 +1,6 @@
 using Ryujinx.Common;
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Device;
-using Ryujinx.Graphics.Gpu.Synchronization;
 using System;
 using System.Numerics;
 
@@ -35,7 +34,7 @@ namespace Ryujinx.Graphics.Host1x
         private int _mask;
         private bool _incrementing;
 
-        public Host1xDevice(SynchronizationManager syncMgr)
+        public Host1xDevice(ISynchronizationManager syncMgr)
         {
             _syncptIncrMgr = new SyncptIncrManager(syncMgr);
             _commandQueue = new AsyncWorkQueue<Command>(Process, "Ryujinx.Host1xProcessor");
@@ -47,7 +46,7 @@ namespace Ryujinx.Graphics.Host1x
 
         public void RegisterDevice(ClassId classId, IDeviceState device)
         {
-            var thi = new ThiDevice(classId, device ?? throw new ArgumentNullException(nameof(device)), _syncptIncrMgr);
+            ThiDevice thi = new(classId, device ?? throw new ArgumentNullException(nameof(device)), _syncptIncrMgr);
             _devices.RegisterDevice(classId, thi);
         }
 

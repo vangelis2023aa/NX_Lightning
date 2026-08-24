@@ -5,10 +5,12 @@ using Ryujinx.Memory;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 
 namespace Ryujinx.Audio.Backends.OpenAL
 {
-    class OpenALHardwareDeviceSession : HardwareDeviceSessionOutputBase
+    // ReSharper disable once InconsistentNaming
+    sealed class OpenALHardwareDeviceSession : HardwareDeviceSessionOutputBase
     {
         private readonly OpenALHardwareDeviceDriver _driver;
         private readonly int _sourceId;
@@ -16,10 +18,11 @@ namespace Ryujinx.Audio.Backends.OpenAL
         private bool _isActive;
         private readonly Queue<OpenALAudioBuffer> _queuedBuffers;
         private ulong _playedSampleCount;
+        private float _volume;
 
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
 
-        public OpenALHardwareDeviceSession(OpenALHardwareDeviceDriver driver, IVirtualMemoryManager memoryManager, SampleFormat requestedSampleFormat, uint requestedSampleRate, uint requestedChannelCount, float requestedVolume) : base(memoryManager, requestedSampleFormat, requestedSampleRate, requestedChannelCount)
+        public OpenALHardwareDeviceSession(OpenALHardwareDeviceDriver driver, IVirtualMemoryManager memoryManager, SampleFormat requestedSampleFormat, uint requestedSampleRate, uint requestedChannelCount) : base(memoryManager, requestedSampleFormat, requestedSampleRate, requestedChannelCount)
         {
             _driver = driver;
             _queuedBuffers = new Queue<OpenALAudioBuffer>();
@@ -27,7 +30,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
             _targetFormat = GetALFormat();
             _isActive = false;
             _playedSampleCount = 0;
-            SetVolume(requestedVolume);
+            SetVolume(1f);
         }
 
         private ALFormat GetALFormat()
@@ -65,7 +68,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
             {
                 OpenALAudioBuffer driverBuffer = new()
                 {
-                    DriverIdentifier = buffer.HostTag,
+                    DriverIdentifier = buffer.DataPointer,
                     BufferId = AL.GenBuffer(),
                     SampleCount = GetSampleCount(buffer),
                 };
@@ -85,17 +88,22 @@ namespace Ryujinx.Audio.Backends.OpenAL
 
         public override void SetVolume(float volume)
         {
-            lock (_lock)
-            {
-                AL.Source(_sourceId, ALSourcef.Gain, volume);
-            }
+            _volume = volume;
+
+            UpdateMasterVolume(_driver.Volume);
         }
 
         public override float GetVolume()
         {
-            AL.GetSource(_sourceId, ALSourcef.Gain, out float volume);
+            return _volume;
+        }
 
-            return volume;
+        public void UpdateMasterVolume(float newVolume)
+        {
+            lock (_lock)
+            {
+                AL.Source(_sourceId, ALSourcef.Gain, newVolume * _volume);
+            }
         }
 
         public override void Start()
@@ -131,7 +139,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
                     return true;
                 }
 
-                return driverBuffer.DriverIdentifier != buffer.HostTag;
+                return driverBuffer.DriverIdentifier != buffer.DataPointer;
             }
         }
 
@@ -183,7 +191,7 @@ namespace Ryujinx.Audio.Backends.OpenAL
             }
         }
 
-        protected virtual void Dispose(bool disposing)
+        private void Dispose(bool disposing)
         {
             if (disposing && _driver.Unregister(this))
             {

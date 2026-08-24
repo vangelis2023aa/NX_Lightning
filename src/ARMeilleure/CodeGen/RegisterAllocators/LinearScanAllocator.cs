@@ -115,7 +115,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
         {
             NumberLocals(cfg, regMasks.RegistersCount);
 
-            var context = new AllocationContext(stackAlloc, regMasks, _intervals.Count);
+            AllocationContext context = new(stackAlloc, regMasks, _intervals.Count);
 
             BuildIntervals(cfg, context);
 
@@ -208,7 +208,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
 
         private bool TryAllocateRegWithoutSpill(AllocationContext context, LiveInterval current, int cIndex, int registersCount)
         {
-            RegisterType regType = current.Local.Type.ToRegisterType();
+            RegisterType regType = current.Local.Type.Register;
 
             Span<int> freePositions = stackalloc int[registersCount];
 
@@ -251,7 +251,20 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
                 }
             }
 
-            int selectedReg = GetHighestValueIndex(freePositions);
+            // If this is a copy destination variable, we prefer the register used for the copy source.
+            // If the register is available, then the copy can be eliminated later as both source
+            // and destination will use the same register.
+            int selectedReg;
+
+            if (current.TryGetCopySourceRegister(out int preferredReg) && freePositions[preferredReg] >= current.GetEnd())
+            {
+                selectedReg = preferredReg;
+            }
+            else
+            {
+                selectedReg = GetHighestValueIndex(freePositions);
+            }
+
             int selectedNextUse = freePositions[selectedReg];
 
             // Intervals starts and ends at odd positions, unless they span an entire
@@ -305,7 +318,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
 
         private void AllocateRegWithSpill(AllocationContext context, LiveInterval current, int cIndex, int registersCount)
         {
-            RegisterType regType = current.Local.Type.ToRegisterType();
+            RegisterType regType = current.Local.Type.Register;
 
             Span<int> usePositions = stackalloc int[registersCount];
             Span<int> blockedPositions = stackalloc int[registersCount];
@@ -431,7 +444,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
             }
         }
 
-        private static int GetHighestValueIndex(Span<int> span)
+        private static int GetHighestValueIndex(ReadOnlySpan<int> span)
         {
             int highest = int.MinValue;
 
@@ -786,8 +799,8 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
 
         private void NumberLocals(ControlFlowGraph cfg, int registersCount)
         {
-            _operationNodes = new List<(IntrusiveList<Operation>, Operation)>();
-            _intervals = new List<LiveInterval>();
+            _operationNodes = [];
+            _intervals = [];
 
             for (int index = 0; index < registersCount; index++)
             {
@@ -798,12 +811,12 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
             // The "visited" state is stored in the MSB of the local's value.
             const ulong VisitedMask = 1ul << 63;
 
-            bool IsVisited(Operand local)
+            static bool IsVisited(Operand local)
             {
                 return (local.GetValueUnsafe() & VisitedMask) != 0;
             }
 
-            void SetVisited(Operand local)
+            static void SetVisited(Operand local)
             {
                 local.GetValueUnsafe() |= VisitedMask;
             }
@@ -826,9 +839,25 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
                         {
                             dest.NumberLocal(_intervals.Count);
 
-                            _intervals.Add(new LiveInterval(dest));
+                            LiveInterval interval = new(dest);
+                            _intervals.Add(interval);
 
                             SetVisited(dest);
+
+                            // If this is a copy (or copy-like operation), set the copy source interval as well.
+                            // This is used for register preferencing later on, which allows the copy to be eliminated
+                            // in some cases.
+                            if (node.Instruction is Instruction.Copy or Instruction.ZeroExtend32)
+                            {
+                                Operand source = node.GetSource(0);
+
+                                if (source.Kind == OperandKind.LocalVariable &&
+                                    source.GetLocalNumber() > 0 &&
+                                    (node.Instruction == Instruction.Copy || source.Type == OperandType.I32))
+                                {
+                                    interval.SetCopySource(_intervals[source.GetLocalNumber()]);
+                                }
+                            }
                         }
                     }
                 }
@@ -951,7 +980,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
 
             _blockLiveIn = blkLiveIn;
 
-            _blockEdges = new HashSet<int>();
+            _blockEdges = [];
 
             // Compute lifetime intervals.
             int operationPos = _operationsCount;
@@ -1091,8 +1120,8 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
 
         private static bool IsLocalOrRegister(OperandKind kind)
         {
-            return kind == OperandKind.LocalVariable ||
-                   kind == OperandKind.Register;
+            return kind is OperandKind.LocalVariable or
+                   OperandKind.Register;
         }
     }
 }

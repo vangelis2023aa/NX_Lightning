@@ -2,11 +2,9 @@ using Ryujinx.Common.Logging;
 
 namespace Ryujinx.HLE.HOS.Services.Vi.RootService.ApplicationDisplayService
 {
-    class IManagerDisplayService : IpcService
+    partial class IManagerDisplayService : IpcService
     {
-#pragma warning disable IDE0052 // Remove unread private member
         private readonly IApplicationDisplayService _applicationDisplayService;
-#pragma warning restore IDE0052
 
         public IManagerDisplayService(IApplicationDisplayService applicationDisplayService)
         {

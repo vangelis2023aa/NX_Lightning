@@ -1,6 +1,5 @@
 using Ryujinx.Graphics.GAL;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 
 namespace Ryujinx.Graphics.Gpu.Image
 {
@@ -10,7 +9,6 @@ namespace Ryujinx.Graphics.Gpu.Image
     static class FormatTable
     {
 #pragma warning disable IDE0055 // Disable formatting
-        [SuppressMessage("Design", "CA1069: Enums values should not be duplicated")]
         private enum TextureFormat : uint
         {
             // Formats
@@ -185,6 +183,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             G24R8RUintGUnormBUnormAUnorm     = G24R8             | RUint  | GUnorm | BUnorm | AUnorm,        // 0x24a0e
             Z24S8RUintGUnormBUnormAUnorm     = Z24S8             | RUint  | GUnorm | BUnorm | AUnorm,        // 0x24a29
             Z24S8RUintGUnormBUintAUint       = Z24S8             | RUint  | GUnorm | BUint  | AUint,         // 0x48a29
+            X8Z24RUnormGUintBUintAUint       = X8Z24             | RUnorm | GUint  | BUint  | AUint,         // 0x4912a
             S8Z24RUnormGUintBUintAUint       = S8Z24             | RUnorm | GUint  | BUint  | AUint,         // 0x4912b
             R32B24G8RFloatGUintBUnormAUnorm  = R32B24G8          | RFloat | GUint  | BUnorm | AUnorm,        // 0x25385
             Zf32X24S8RFloatGUintBUnormAUnorm = Zf32X24S8         | RFloat | GUint  | BUnorm | AUnorm,        // 0x253b0
@@ -248,7 +247,6 @@ namespace Ryujinx.Graphics.Gpu.Image
             A5B5G5R1Unorm                    = A5B5G5R1          | RUnorm | GUnorm | BUnorm | AUnorm,        // 0x24913
         }
 
-        [SuppressMessage("Design", "CA1069: Enums values should not be duplicated")]
         private enum VertexAttributeFormat : uint
         {
             // Width
@@ -360,6 +358,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             A2B10G10R10Sint     = (A2B10G10R10 << 21)  | (Sint << 27),    // 0x1e000000
             A2B10G10R10Uscaled  = (A2B10G10R10 << 21)  | (Uscaled << 27), // 0x2e000000
             A2B10G10R10Sscaled  = (A2B10G10R10 << 21)  | (Sscaled << 27), // 0x36000000
+            A8B8G8R8Uint        = (A8B8G8R8 << 21)     | (Uint << 27),    // 0x25E00040
         }
 
         private static readonly Dictionary<TextureFormat, FormatInfo> _textureFormats = new()
@@ -410,6 +409,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             { TextureFormat.G24R8RUintGUnormBUnormAUnorm,     new FormatInfo(Format.D24UnormS8Uint,    1,  1,  4,  2) },
             { TextureFormat.Z24S8RUintGUnormBUnormAUnorm,     new FormatInfo(Format.D24UnormS8Uint,    1,  1,  4,  2) },
             { TextureFormat.Z24S8RUintGUnormBUintAUint,       new FormatInfo(Format.D24UnormS8Uint,    1,  1,  4,  2) },
+            { TextureFormat.X8Z24RUnormGUintBUintAUint,       new FormatInfo(Format.X8UintD24Unorm,    1,  1,  4,  2) },
             { TextureFormat.S8Z24RUnormGUintBUintAUint,       new FormatInfo(Format.S8UintD24Unorm,    1,  1,  4,  2) },
             { TextureFormat.R32B24G8RFloatGUintBUnormAUnorm,  new FormatInfo(Format.D32FloatS8Uint,    1,  1,  8,  2) },
             { TextureFormat.Zf32X24S8RFloatGUintBUnormAUnorm, new FormatInfo(Format.D32FloatS8Uint,    1,  1,  8,  2) },
@@ -554,6 +554,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             { VertexAttributeFormat.A2B10G10R10Sint,     Format.R10G10B10A2Sint     },
             { VertexAttributeFormat.A2B10G10R10Uscaled,  Format.R10G10B10A2Uscaled  },
             { VertexAttributeFormat.A2B10G10R10Sscaled,  Format.R10G10B10A2Sscaled  },
+            { VertexAttributeFormat.A8B8G8R8Uint,        Format.A8B8G8R8Uint        },
         };
 #pragma warning restore IDE0055
 
@@ -661,7 +662,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             bool found = _textureFormats.TryGetValue((TextureFormat)encoded, out format);
 
-            if (found && isPacked && !format.Format.IsDepthOrStencil())
+            if (found && isPacked && !format.Format.IsDepthOrStencil)
             {
                 // If the packed flag is set, then the components of the pixel are tightly packed into the
                 // GPU registers on the shader.
@@ -672,9 +673,9 @@ namespace Ryujinx.Graphics.Gpu.Image
                 {
                     1 => new FormatInfo(Format.R8Unorm, 1, 1, 1, 1),
                     2 => new FormatInfo(Format.R16Unorm, 1, 1, 2, 1),
-                    4 => new FormatInfo(Format.R32Float, 1, 1, 4, 1),
-                    8 => new FormatInfo(Format.R32G32Float, 1, 1, 8, 2),
-                    16 => new FormatInfo(Format.R32G32B32A32Float, 1, 1, 16, 4),
+                    4 => new FormatInfo(Format.R32Uint, 1, 1, 4, 1),
+                    8 => new FormatInfo(Format.R32G32Uint, 1, 1, 8, 2),
+                    16 => new FormatInfo(Format.R32G32B32A32Uint, 1, 1, 16, 4),
                     _ => format,
                 };
             }
@@ -702,7 +703,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>True if the format is valid, false otherwise</returns>
         public static bool TryGetSingleComponentAttribFormat(uint encoded, out Format format, out int componentsCount)
         {
-            bool result = _singleComponentAttribFormats.TryGetValue((VertexAttributeFormat)encoded, out var tuple);
+            bool result = _singleComponentAttribFormats.TryGetValue((VertexAttributeFormat)encoded, out (Format, int) tuple);
 
             format = tuple.Item1;
             componentsCount = tuple.Item2;

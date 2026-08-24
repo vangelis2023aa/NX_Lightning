@@ -67,7 +67,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
             {
                 if (disposing)
                 {
-                    foreach (var texture in _cache.Values)
+                    foreach (ITexture texture in _cache.Values)
                     {
                         texture.Release();
                     }
@@ -285,6 +285,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                     {
                         data[index] = index;
                     }
+
                     break;
                 case PrimitiveTopology.LineLoop:
                     data[^1] = 0;
@@ -294,6 +295,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                         data[index] = index >> 1;
                         data[index + 1] = (index >> 1) + 1;
                     }
+
                     break;
                 case PrimitiveTopology.LineStrip:
                     for (int index = 0; index < ((data.Length - 1) & ~1); index += 2)
@@ -301,6 +303,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                         data[index] = index >> 1;
                         data[index + 1] = (index >> 1) + 1;
                     }
+
                     break;
                 case PrimitiveTopology.TriangleStrip:
                     int tsTrianglesCount = data.Length / 3;
@@ -330,6 +333,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                             data[baseIndex + 2] = tsOutIndex++;
                         }
                     }
+
                     break;
                 case PrimitiveTopology.TriangleFan:
                 case PrimitiveTopology.Polygon:
@@ -342,6 +346,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                         data[index + 1] = tfOutIndex;
                         data[index + 2] = ++tfOutIndex;
                     }
+
                     break;
                 case PrimitiveTopology.Quads:
                     int qQuadsCount = data.Length / 6;
@@ -358,6 +363,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                         data[index + 4] = qIndex + 2;
                         data[index + 5] = qIndex + 3;
                     }
+
                     break;
                 case PrimitiveTopology.QuadStrip:
                     int qsQuadsCount = data.Length / 6;
@@ -384,6 +390,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                         data[index + 4] = qIndex + 2;
                         data[index + 5] = qIndex + 3;
                     }
+
                     break;
                 case PrimitiveTopology.LineStripAdjacency:
                     for (int index = 0; index < ((data.Length - 3) & ~3); index += 4)
@@ -395,6 +402,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                         data[index + 2] = lIndex + 2;
                         data[index + 3] = lIndex + 3;
                     }
+
                     break;
                 case PrimitiveTopology.TriangleStripAdjacency:
                     int tsaTrianglesCount = data.Length / 6;
@@ -433,12 +441,13 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                             data[baseIndex + 5] = tsaOutIndex++;
                         }
                     }
+
                     break;
             }
 
             ReadOnlySpan<byte> dataBytes = MemoryMarshal.Cast<int, byte>(data);
 
-            BufferHandle buffer = _context.Renderer.CreateBuffer(dataBytes.Length);
+            BufferHandle buffer = _context.Renderer.CreateBuffer(dataBytes.Length, BufferAccess.DeviceMemory);
             _context.Renderer.SetBufferData(buffer, 0, dataBytes);
 
             return new IndexBuffer(buffer, count, dataBytes.Length);
@@ -529,7 +538,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
         {
             if (_dummyBuffer == BufferHandle.Null)
             {
-                _dummyBuffer = _context.Renderer.CreateBuffer(DummyBufferSize);
+                _dummyBuffer = _context.Renderer.CreateBuffer(DummyBufferSize, BufferAccess.DeviceMemory);
                 _context.Renderer.Pipeline.ClearBuffer(_dummyBuffer, 0, DummyBufferSize, 0);
             }
 
@@ -550,7 +559,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                     _context.Renderer.DeleteBuffer(_sequentialIndexBuffer);
                 }
 
-                _sequentialIndexBuffer = _context.Renderer.CreateBuffer(count * sizeof(uint));
+                _sequentialIndexBuffer = _context.Renderer.CreateBuffer(count * sizeof(uint), BufferAccess.DeviceMemory);
                 _sequentialIndexBufferCount = count;
 
                 Span<int> data = new int[count];
@@ -583,7 +592,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                     _context.Renderer.DeleteBuffer(buffer.Handle);
                 }
 
-                buffer.Handle = _context.Renderer.CreateBuffer(newSize);
+                buffer.Handle = _context.Renderer.CreateBuffer(newSize, BufferAccess.DeviceMemory);
                 buffer.Size = newSize;
             }
 
@@ -620,7 +629,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed.ComputeDraw
                 DestroyIfNotNull(ref _geometryIndexDataBuffer.Handle);
                 DestroyIfNotNull(ref _sequentialIndexBuffer);
 
-                foreach (var indexBuffer in _topologyRemapBuffers.Values)
+                foreach (IndexBuffer indexBuffer in _topologyRemapBuffers.Values)
                 {
                     _context.Renderer.DeleteBuffer(indexBuffer.Handle);
                 }

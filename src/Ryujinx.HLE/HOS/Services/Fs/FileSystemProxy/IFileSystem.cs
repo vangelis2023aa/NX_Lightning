@@ -2,11 +2,12 @@ using LibHac;
 using LibHac.Common;
 using LibHac.Fs;
 using LibHac.Fs.Fsa;
+using Ryujinx.Common.Logging;
 using Path = LibHac.FsSrv.Sf.Path;
 
 namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
 {
-    class IFileSystem : DisposableIpcService
+    partial class IFileSystem : DisposableIpcService
     {
         private SharedRef<LibHac.FsSrv.Sf.IFileSystem> _fileSystem;
 
@@ -110,7 +111,7 @@ namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
             uint mode = context.RequestData.ReadUInt32();
 
             ref readonly Path name = ref FileSystemProxyHelper.GetSfPath(context);
-            using var file = new SharedRef<LibHac.FsSrv.Sf.IFile>();
+            using SharedRef<LibHac.FsSrv.Sf.IFile> file = new();
 
             Result result = _fileSystem.Get.OpenFile(ref file.Ref, in name, mode);
 
@@ -131,9 +132,9 @@ namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
             uint mode = context.RequestData.ReadUInt32();
 
             ref readonly Path name = ref FileSystemProxyHelper.GetSfPath(context);
-            using var dir = new SharedRef<LibHac.FsSrv.Sf.IDirectory>();
+            using SharedRef<LibHac.FsSrv.Sf.IDirectory> dir = new();
 
-            Result result = _fileSystem.Get.OpenDirectory(ref dir.Ref, name, mode);
+            Result result = _fileSystem.Get.OpenDirectory(ref dir.Ref, in name, mode);
 
             if (result.IsSuccess())
             {
@@ -149,7 +150,13 @@ namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
         // Commit()
         public ResultCode Commit(ServiceCtx context)
         {
-            return (ResultCode)_fileSystem.Get.Commit().Value;
+            ResultCode resultCode = (ResultCode)_fileSystem.Get.Commit().Value;
+            if (resultCode == ResultCode.PathAlreadyInUse)
+            {
+                Logger.Warning?.Print(LogClass.ServiceFs, "The file system is already in use by another process.");
+            }
+
+            return resultCode;
         }
 
         [CommandCmif(11)]

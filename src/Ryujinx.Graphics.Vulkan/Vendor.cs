@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using Silk.NET.Vulkan;
 
 namespace Ryujinx.Graphics.Vulkan
 {
@@ -15,11 +15,8 @@ namespace Ryujinx.Graphics.Vulkan
         Unknown,
     }
 
-    static partial class VendorUtils
+    static class VendorUtils
     {
-        [GeneratedRegex("Radeon (((HD|R(5|7|9|X)) )?((M?[2-6]\\d{2}(\\D|$))|([7-8]\\d{3}(\\D|$))|Fury|Nano))|(Pro Duo)")]
-        public static partial Regex AmdGcnRegex();
-
         public static Vendor FromId(uint id)
         {
             return id switch
@@ -56,6 +53,40 @@ namespace Ryujinx.Graphics.Vulkan
                 0x10005 => "Mesa",
                 0x10006 => "PoCL",
                 _ => $"0x{id:X}",
+            };
+        }
+
+        public static string GetFriendlyDriverName(DriverId id)
+        {
+            return id switch
+            {
+                DriverId.AmdProprietary => "AMD",
+                DriverId.AmdOpenSource => "AMD (Open)",
+                DriverId.MesaRadv => "RADV",
+                DriverId.NvidiaProprietary => "NVIDIA",
+                DriverId.IntelProprietaryWindows => "Intel",
+                DriverId.IntelOpenSourceMesa => "Intel (Open)",
+                DriverId.ImaginationProprietary => "Imagination",
+                DriverId.QualcommProprietary => "Qualcomm",
+                DriverId.ArmProprietary => "ARM",
+                DriverId.GoogleSwiftshader => "SwiftShader",
+                DriverId.GgpProprietary => "GGP",
+                DriverId.BroadcomProprietary => "Broadcom",
+                DriverId.MesaLlvmpipe => "LLVMpipe",
+                DriverId.Moltenvk => "MoltenVK",
+                DriverId.CoreaviProprietary => "CoreAVI",
+                DriverId.JuiceProprietary => "Juice",
+                DriverId.VerisiliconProprietary => "Verisilicon",
+                DriverId.MesaTurnip => "Turnip",
+                DriverId.MesaV3DV => "V3DV",
+                DriverId.MesaPanvk => "PanVK",
+                DriverId.SamsungProprietary => "Samsung",
+                DriverId.MesaVenus => "Venus",
+                DriverId.MesaDozen => "Dozen",
+                DriverId.MesaNvk => "NVK",
+                DriverId.ImaginationOpenSourceMesa => "Imagination (Open)",
+                DriverId.MesaHoneykrisp => "Honeykrisp",
+                _ => id.ToString(),
             };
         }
     }

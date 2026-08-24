@@ -56,6 +56,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             _activeCount = 0;
 
             JoyHold = NpadJoyHoldType.Vertical;
+            SixAxisActive = false;
         }
 
         internal ref KEvent GetStyleSetUpdateEvent(PlayerIndex player)
@@ -94,6 +95,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             primaryIndex = PlayerIndex.Unknown;
             configuredCount = 0;
 
+            Span<NpadState> nPadsSpan = _device.Hid.SharedMemory.Npads.AsSpan();
+
             for (int i = 0; i < MaxControllers; ++i)
             {
                 ControllerType npad = _configuredTypes[i];
@@ -103,7 +106,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
                     continue;
                 }
 
-                ControllerType currentType = (ControllerType)_device.Hid.SharedMemory.Npads[i].InternalState.StyleSet;
+                ControllerType currentType = (ControllerType)nPadsSpan[i].InternalState.StyleSet;
 
                 if (currentType != ControllerType.None && (npad & acceptedTypes) != 0 && _supportedPlayers[i])
                 {
@@ -123,7 +126,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             return true;
         }
 
-        public void Configure(params ControllerConfig[] configs)
+        public void Configure(params ReadOnlySpan<ControllerConfig> configs)
         {
             _configuredTypes = new ControllerType[MaxControllers];
 
@@ -577,6 +580,29 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             }
 
             return needUpdateRight;
+        }
+        
+        public bool isAtRest(int playerNumber)
+        {
+            ref NpadInternalState currentNpad = ref _device.Hid.SharedMemory.Npads[playerNumber].InternalState;
+
+            if (currentNpad.StyleSet == NpadStyleTag.None)
+            {
+                return true; // it will always be at rest because it cannot move.
+            }
+            
+            ref SixAxisSensorState storage = ref GetSixAxisSensorLifo(ref currentNpad, false).GetCurrentEntryRef();
+                
+            float acceleration = Math.Abs(storage.Acceleration.X)
+                                 + Math.Abs(storage.Acceleration.Y)
+                                 + Math.Abs(storage.Acceleration.Z);
+
+            float angularVelocity = Math.Abs(storage.AngularVelocity.X)
+                                    + Math.Abs(storage.AngularVelocity.Y)
+                                    + Math.Abs(storage.AngularVelocity.Z);
+
+            // TODO: check against config deadzone and add sensitivity setting
+            return ((acceleration <= 1.0F) && (angularVelocity <= 1.0F));
         }
 
         private void UpdateDisconnectedInputSixAxis(PlayerIndex index)

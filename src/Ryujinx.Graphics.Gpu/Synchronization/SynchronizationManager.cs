@@ -1,4 +1,5 @@
 using Ryujinx.Common.Logging;
+using Ryujinx.Graphics.Device;
 using System;
 using System.Threading;
 
@@ -7,7 +8,7 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
     /// <summary>
     /// GPU synchronization manager.
     /// </summary>
-    public class SynchronizationManager
+    public class SynchronizationManager : ISynchronizationManager
     {
         /// <summary>
         /// The maximum number of syncpoints supported by the GM20B.
@@ -29,12 +30,7 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
             }
         }
 
-        /// <summary>
-        /// Increment the value of a syncpoint with a given id.
-        /// </summary>
-        /// <param name="id">The id of the syncpoint</param>
-        /// <exception cref="System.ArgumentOutOfRangeException">Thrown when id >= MaxHardwareSyncpoints</exception>
-        /// <returns>The incremented value of the syncpoint</returns>
+        /// <inheritdoc/>
         public uint IncrementSyncpoint(uint id)
         {
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(id, (uint)MaxHardwareSyncpoints);
@@ -42,12 +38,7 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
             return _syncpoints[id].Increment();
         }
 
-        /// <summary>
-        /// Get the value of a syncpoint with a given id.
-        /// </summary>
-        /// <param name="id">The id of the syncpoint</param>
-        /// <exception cref="System.ArgumentOutOfRangeException">Thrown when id >= MaxHardwareSyncpoints</exception>
-        /// <returns>The value of the syncpoint</returns>
+        /// <inheritdoc/>
         public uint GetSyncpointValue(uint id)
         {
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(id, (uint)MaxHardwareSyncpoints);
@@ -84,15 +75,7 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
             _syncpoints[id].UnregisterCallback(waiterInformation);
         }
 
-        /// <summary>
-        /// Wait on a syncpoint with a given id at a target threshold.
-        /// The callback will be called once the threshold is reached and will automatically be unregistered.
-        /// </summary>
-        /// <param name="id">The id of the syncpoint</param>
-        /// <param name="threshold">The target threshold</param>
-        /// <param name="timeout">The timeout</param>
-        /// <exception cref="System.ArgumentOutOfRangeException">Thrown when id >= MaxHardwareSyncpoints</exception>
-        /// <returns>True if timed out</returns>
+        /// <inheritdoc/>
         public bool WaitOnSyncpoint(uint id, uint threshold, TimeSpan timeout)
         {
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(id, (uint)MaxHardwareSyncpoints);
@@ -104,7 +87,7 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
             }
 
             using ManualResetEvent waitEvent = new(false);
-            var info = _syncpoints[id].RegisterCallback(threshold, (x) => waitEvent.Set());
+            SyncpointWaiterHandle info = _syncpoints[id].RegisterCallback(threshold, _ => waitEvent.Set());
 
             if (info == null)
             {
@@ -113,7 +96,7 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
 
             bool signaled = waitEvent.WaitOne(timeout);
 
-            if (!signaled && info != null)
+            if (!signaled)
             {
                 Logger.Error?.Print(LogClass.Gpu, $"Wait on syncpoint {id} for threshold {threshold} took more than {timeout.TotalMilliseconds}ms, resuming execution...");
 

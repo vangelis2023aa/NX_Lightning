@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -32,29 +33,23 @@ namespace Ryujinx.Graphics.Device
                 _debugLogCallback = debugLogCallback;
             }
 
-            var fields = typeof(TState).GetFields();
-            var t = typeof(TState);
+            FieldInfo[] fields = typeof(TState).GetFields();
             int offset = 0;
 
             for (int fieldIndex = 0; fieldIndex < fields.Length; fieldIndex++)
             {
-                var field = fields[fieldIndex];
+                FieldInfo field = fields[fieldIndex];
 
-                var cuurentFieldOffset = (int)Marshal.OffsetOf<TState>(field.Name);
-                var nextFieldOffset = fieldIndex + 1 == fields.Length ? Unsafe.SizeOf<TState>() : (int)Marshal.OffsetOf<TState>(fields[fieldIndex + 1].Name);
+                int currentFieldOffset = (int)Marshal.OffsetOf<TState>(field.Name);
+                int nextFieldOffset = fieldIndex + 1 == fields.Length ? Unsafe.SizeOf<TState>() : (int)Marshal.OffsetOf<TState>(fields[fieldIndex + 1].Name);
 
-                int sizeOfField = nextFieldOffset - cuurentFieldOffset;
-
-                if(sizeOfField == 0)
-                {
-
-                }
+                int sizeOfField = nextFieldOffset - currentFieldOffset;
 
                 for (int i = 0; i < ((sizeOfField + 3) & ~3); i += 4)
                 {
                     int index = (offset + i) / RegisterSize;
 
-                    if (callbacks != null && callbacks.TryGetValue(field.Name, out var cb))
+                    if (callbacks != null && callbacks.TryGetValue(field.Name, out RwCallback cb))
                     {
                         if (cb.Read != null)
                         {
@@ -86,16 +81,8 @@ namespace Ryujinx.Graphics.Device
             if (index < Size)
             {
                 uint alignedOffset = index * RegisterSize;
-
-                var readCallback = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_readCallbacks), (IntPtr)index);
-                if (readCallback != null)
-                {
-                    return readCallback();
-                }
-                else
-                {
-                    return GetRefUnchecked<int>(alignedOffset);
-                }
+                
+                return _readCallbacks[index]?.Invoke() ?? GetRefUnchecked<int>(alignedOffset);
             }
 
             return 0;
@@ -110,9 +97,9 @@ namespace Ryujinx.Graphics.Device
                 uint alignedOffset = index * RegisterSize;
                 DebugWrite(alignedOffset, data);
 
-                GetRefIntAlignedUncheck(index) = data;
+                SetIntAlignedUncheck(index, data);
 
-                Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_writeCallbacks), (IntPtr)index)?.Invoke(data);
+                _writeCallbacks[index]?.Invoke(data);
             }
         }
 
@@ -125,11 +112,9 @@ namespace Ryujinx.Graphics.Device
                 uint alignedOffset = index * RegisterSize;
                 DebugWrite(alignedOffset, data);
 
-                ref var storage = ref GetRefIntAlignedUncheck(index);
-                changed = storage != data;
-                storage = data;
+                changed = SetIntAlignedUncheckChanged(index, data);
 
-                Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_writeCallbacks), (IntPtr)index)?.Invoke(data);
+                _writeCallbacks[index]?.Invoke(data);
             }
             else
             {
@@ -159,13 +144,32 @@ namespace Ryujinx.Graphics.Device
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private ref T GetRefUnchecked<T>(uint offset) where T : unmanaged
         {
-            return ref Unsafe.As<TState, T>(ref Unsafe.AddByteOffset(ref State, (IntPtr)offset));
+            return ref Unsafe.As<TState, T>(ref Unsafe.AddByteOffset(ref State, (nint)offset));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private ref int GetRefIntAlignedUncheck(ulong index)
         {
-            return ref Unsafe.Add(ref Unsafe.As<TState, int>(ref State), (IntPtr)index);
+            return ref Unsafe.Add(ref Unsafe.As<TState, int>(ref State), (nint)index);
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SetIntAlignedUncheck(ulong index, int data)
+        {
+            Unsafe.Add(ref Unsafe.As<TState, int>(ref State), (nint)index) = data;
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool SetIntAlignedUncheckChanged(ulong index, int data)
+        {
+            ref int val = ref Unsafe.Add(ref Unsafe.As<TState, int>(ref State), (nint)index);
+            if (val == data)
+            {
+                return false;
+            }
+            val = data;
+            
+            return true;
         }
     }
 }

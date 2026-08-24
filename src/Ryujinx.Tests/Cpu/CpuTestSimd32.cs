@@ -14,33 +14,34 @@ namespace Ryujinx.Tests.Cpu
         #region "ValueSource (Opcodes)"
         private static uint[] _Vabs_Vneg_Vpaddl_I_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf3b10300u, // VABS.S8   D0, D0
                 0xf3b10380u, // VNEG.S8   D0, D0
-                0xf3b00200u, // VPADDL.S8 D0, D0
-            };
+                0xf3b00200u // VPADDL.S8 D0, D0
+            ];
         }
 
         private static uint[] _Vabs_Vneg_F_()
         {
-            return new[]
-            {
+            return
+            [
                 0xf3b90700u, // VABS.F32 D0, D0
-                0xf3b90780u, // VNEG.F32 D0, D0
-            };
+                0xf3b90780u // VNEG.F32 D0, D0
+            ];
         }
         #endregion
 
         #region "ValueSource (Types)"
         private static ulong[] _8B4H2S_()
         {
-            return new[] {
+            return
+            [
                 0x0000000000000000ul, 0x7F7F7F7F7F7F7F7Ful,
                 0x8080808080808080ul, 0x7FFF7FFF7FFF7FFFul,
                 0x8000800080008000ul, 0x7FFFFFFF7FFFFFFFul,
-                0x8000000080000000ul, 0xFFFFFFFFFFFFFFFFul,
-            };
+                0x8000000080000000ul, 0xFFFFFFFFFFFFFFFFul
+            ];
         }
 
         private static IEnumerable<ulong> _1S_F_()
@@ -322,6 +323,55 @@ namespace Ryujinx.Tests.Cpu
 
             V128 v0 = MakeVectorE0E1(z, ~z);
             V128 v1 = MakeVectorE0E1(b, ~b);
+
+            SingleOpcode(opcode, v0: v0, v1: v1);
+
+            CompareAgainstUnicorn();
+        }
+
+        [Test, Pairwise, Description("VSHLL.<size> {<Vd>}, <Vm>, #<imm>")]
+        public void Vshll([Values(0u, 2u)] uint rd,
+                          [Values(1u, 0u)] uint rm,
+                          [Values(0u, 1u, 2u)] uint size,
+                          [Random(RndCnt)] ulong z,
+                          [Random(RndCnt)] ulong a,
+                          [Random(RndCnt)] ulong b)
+        {
+            uint opcode = 0xf3b20300u; // VSHLL.I8 Q0, D0, #8
+
+            opcode |= ((rm & 0xf) << 0) | ((rm & 0x10) << 1);
+            opcode |= ((rd & 0xf) << 12) | ((rd & 0x10) << 18);
+            opcode |= size << 18;
+
+            V128 v0 = MakeVectorE0E1(z, z);
+            V128 v1 = MakeVectorE0E1(a, z);
+            V128 v2 = MakeVectorE0E1(b, z);
+
+            SingleOpcode(opcode, v0: v0, v1: v1, v2: v2);
+
+            CompareAgainstUnicorn();
+        }
+
+        [Test, Pairwise, Description("VSWP D0, D0")]
+        public void Vswp([Values(0u, 1u)] uint rd,
+                         [Values(0u, 1u)] uint rm,
+                         [Values] bool q)
+        {
+            uint opcode = 0xf3b20000u; // VSWP D0, D0
+
+            if (q)
+            {
+                opcode |= 1u << 6;
+
+                rd &= ~1u;
+                rm &= ~1u;
+            }
+
+            opcode |= ((rd & 0xf) << 12) | ((rd & 0x10) << 18);
+            opcode |= ((rm & 0xf) << 0) | ((rm & 0x10) << 1);
+
+            V128 v0 = new(TestContext.CurrentContext.Random.NextULong(), TestContext.CurrentContext.Random.NextULong());
+            V128 v1 = new(TestContext.CurrentContext.Random.NextULong(), TestContext.CurrentContext.Random.NextULong());
 
             SingleOpcode(opcode, v0: v0, v1: v1);
 

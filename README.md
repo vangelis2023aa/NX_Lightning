@@ -1,144 +1,228 @@
-
-<h1 align="center">
-  <br>
-  <a href="https://ryujinx.org/"><img src="https://i.imgur.com/WcCj6Rt.png" alt="Ryujinx" width="150"></a>
-  <br>
-  <b>Ryujinx</b>
-  <br>
-  <sub><sup><b>(REE-YOU-JINX)</b></sup></sub>
-  <br>
-
-</h1>
-
-<p align="center">
-       Ryujinx is an open-source Nintendo Switch emulator, created by gdkchan, written in C#.
-       This emulator aims at providing excellent accuracy and performance, a user-friendly interface and consistent builds.
-    It was written from scratch and development on the project began in September 2017. Ryujinx is available on Github under the <a href="https://github.com/Ryujinx/Ryujinx/blob/master/LICENSE.txt" target="_blank">MIT license</a>. <br />
-
-</p>
-<p align="center">
-    <a href="https://github.com/Ryujinx/Ryujinx/actions/workflows/release.yml">
-        <img src="https://github.com/Ryujinx/Ryujinx/actions/workflows/release.yml/badge.svg"
-            alt="">
+<body>
+  <p align="center">
+    <a href="https://melonx.org">
+      <img src="https://git.ryujinx.app/MeloNX/MeloNX-Legacy/raw/branch/XC-ios-ht/src/MeloNX/MeloNX/Assets/Assets.xcassets/AppIcon.appiconset/nxgradientpng.png" alt="MeloNX Logo" width="120">
     </a>
-    <a href="https://crwd.in/ryujinx">
-        <img src="https://badges.crowdin.net/ryujinx/localized.svg"
-            alt="">
-    </a>
-    <a href="https://discord.com/invite/VkQYXAZ">
-        <img src="https://img.shields.io/discord/410208534861447168?color=5865F2&label=Ryujinx&logo=discord&logoColor=white"
-            alt="Discord">
-    </a>
-    <br>
-    <br>
-    <img src="https://raw.githubusercontent.com/Ryujinx/Ryujinx-Website/master/public/assets/images/shell.png">
-</p>
+  </p>
+  <h1 align="center">MeloNX</h1>
+  <p align="center">
+    MeloNX enables Nintendo Switch game emulation on iOS using Ryujinx as a base.
+  </p>
+  <p align="center">
+    MeloNX is an iOS Nintendo Switch emulator based on Ryujinx, written primarily in C# and Swift. Designed to bring accurate performance and a user-friendly interface to iOS, MeloNX makes Switch games accessible on Apple devices.
+    Developed from the ground up, MeloNX is open-source and available on Github under the <a href="LICENSE.txt" target="_blank">GPLv3 license</a>.
+  </p>
+</body>
 
-<h5 align="center">
+# FAQ
 
-</h5>
+#### **Where's the prod.keys file?/Where can I download \[game]?**
+**We do not support piracy**, It is forbidden to request copyrighted content 
+(Firmware/Games/Keys/Shaders) on our repositories or on the MeloNX Discord.
 
-## Compatibility
+#### **Do I need a Switch to use this emulator?**
+MeloNX emulator is capable of running many homebrew applications, and can be a crucial tool in the development and debugging of homebrew applications and games. To play commercial games, you will need access to a Switch compatible with custom firmware (CFW), which will enable you to dump your system firmware, keys and legally purchased games.
 
-As of April 2023, Ryujinx has been tested on approximately 4,050 titles; over 4,000 boot past menus and into gameplay, with roughly 3,400 of those being considered playable.
-You can check out the compatibility list [here](https://github.com/Ryujinx/Ryujinx-Games-List/issues). Anyone is free to submit a new game test or update an existing game test entry; simply follow the new issue template and testing guidelines, or post as a reply to the applicable game issue. Use the search function to see if a game has been tested already!
+#### **How can I dump my firmware/games/keys?**
+First, you need to hack your Nintendo Switch, which you can learn how to do here: [https://nh-server.github.io/switch-guide/](https://nh-server.github.io/switch-guide/).
 
-## Usage
+Once you have hacked your Switch, backed up your keys and dumped your firmware, you may follow these guides to dump keys, updates and DLC, firmware and games:
 
-To run this emulator, your PC must be equipped with at least 8GiB of RAM; failing to meet this requirement may result in a poor gameplay experience or unexpected crashes.
+[Keys](https://docs.ryujinx.app/guides/dumping/keys/)<br>
+[Games, Updates and DLC](https://docs.ryujinx.app/guides/dumping/game-content/)<br>
+[Firmware](https://docs.ryujinx.app/guides/dumping/fw/)
 
-See our [Setup & Configuration Guide](https://github.com/Ryujinx/Ryujinx/wiki/Ryujinx-Setup-&-Configuration-Guide) on how to set up the emulator.
+# Info
+- A Paid Developer account or [TrollStore](https://github.com/opa334/TrollStore) may be needed for specific devices (Read about Entitlements below)
+- MeloNX **REQUIRES** JIT and CANNOT run without it.
+- Recommended iPhone: iPhone 15 Pro+ (8/12GB RAM both have the same memory limit of 6GB)
+- Recommended iPad: iPad Pro 5th+ 128GB+ (8GB RAM) / 1TB+ (16GB RAM) or iPad Air 5+ (8GB RAM)
+- Lowest Compatible Device (Paid Developer Account): iPhone 6s (iOS 15)
+- Lowest Compatible Device (Free Developer Account): iPhone 12
 
-For our Local Wireless and LAN builds, see our [Multiplayer: Local Play/Local Wireless Guide
-](https://github.com/Ryujinx/Ryujinx/wiki/Multiplayer-(LDN-Local-Wireless)-Guide).
+# Entitlements
 
-Avalonia UI comes with translations for various languages. See [Crowdin](https://crwd.in/ryujinx) for more information.
+> **Entitlements** are the underlying security permissions that allow an app to access specific features of your device
 
-## Latest build
+MeloNX can use **2** Entitlements:
 
-These builds are compiled automatically for each commit on the master branch. While we strive to ensure optimal stability and performance prior to pushing an update, our automated builds **may be unstable or completely broken.**
+**Increased Memory Limit:**<br>
+\- This allows MeloNX to be able to use the most amount of ram apple lets us.
 
-If you want to see details on updates to the emulator, you can visit our [Changelog](https://github.com/Ryujinx/Ryujinx/wiki/Changelog).
+**Extended Virtual Addressing**:<br>
+\- This allows MeloNX to be able to ask iOS for more memory / RAM then actually available.<br>
+\- Extended Virtual Addressing is a **PAID** entitlement, [TrollStore](https://github.com/opa334/TrollStore) also gives this entitlement.
 
-The latest automatic build for Windows, macOS, and Linux can be found on the [Official Website](https://ryujinx.org/download).
+Increased Memory Limit is required for **all devices**.
 
+Extended Virtual Addressing is required for *specific devices* which don't allow us to ask the RAM we need without the Extended Virtual Addressing entitlement.
 
-## Building
+Those Devices include:<br>
+iPads with less than 8GB of RAM.<br>
+iPhones with less than 4GB of RAM.
 
-If you wish to build the emulator yourself, follow these steps:
+## Discord Server
+We have a discord server!
+- https://discord.gg/HjCDPTpC3W
 
-### Step 1
-Install the X64 version of [.NET 8.0 (or higher) SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+## How to install
 
-### Step 2
-Either use `git clone https://github.com/Ryujinx/Ryujinx` on the command line to clone the repository or use Code --> Download zip button to get the files.
+### Recommended Guide (Plumeimpactor)
 
-### Step 3
+> [SideStore](https://sidestore.io/) is recommended (optional) for an on-device Sideloader, and should be installed prior performing this install.
 
-To build Ryujinx, open a command prompt inside the project directory. You can quickly access it on Windows by holding shift in File Explorer, then right clicking and selecting `Open command window here`. Then type the following command:
-`dotnet build -c Release -o build`
-the built files will be found in the newly created build directory.
+#### **Make sure to read the FAQ and Info before continuing.**
 
-Ryujinx system files are stored in the `Ryujinx` folder. This folder is located in the user folder, which can be accessed by clicking `Open Ryujinx Folder` under the File menu in the GUI.
+#### 1. Sideload Application
+Download and install MeloNX using [PlumeImpactor](https://github.com/claration/Impactor/releases) on a computer.
+- [Download **MeloNX** From Releases](https://git.ryujinx.app/projects/MeloNX/releases)
+- Open PlumeImpactor > Click Settings > Click Login
+- Login with the same Apple ID you are using for SideStore (or AltStore).
+- Import the MeloNX .ipa you downloaded earlier.
+- Plug in your iDevice.
+- Select your iDevice from the dropdown at the top of the window.
+- Click Install.
 
+#### 2. Load Into SideStore (Optional)
+To have MeloNX show inside SideStore (or AltStore), You must re-install it:
+- Open **SideStore** on your iDevice
+- Select the **My Apps** tab > Tap the **+** button.
+- Select the **MeloNX** .ipa (You may need to download it again.)
+- Wait for it to Sideload, then it should show up Inside **SideStore**.
+- Now You can Refresh **MeloNX** and Update it without needing a computer.
+
+#### 4. Setup Files
+- Add Encryption Keys and Firmware using the file picker inside MeloNX,
+- Information for where to get these files are [here](#how-can-i-dump-my-firmwaregameskeys)
+
+#### 5. Enable JIT
+- Enable JIT using your preferred method, on iOS 26 [StikDebug](https://github.com/StephenDev0/StikDebug) is required.
+  
+
+### Paid Developer Account (Legacy)
+
+#### **Make sure to read the FAQ and Info before continuing.**
+
+#### 1. Sideload MeloNX
+Download and install MeloNX using your preferred Apple ID (NOT CERT) sideloader:
+- [Download MeloNX from Releases](https://git.ryujinx.app/projects/MeloNX/releases)
+
+#### 2. Enable Memory Entitlement
+- Visit [Apple Developer Identifiers](https://developer.apple.com/account/resources/identifiers).
+- Locate **MeloNX** and enable the following entitlements:
+- `Increased Memory Limit`
+- `Extended Virtual Addressing`
+- `Increased Debugging Memory Limit`
+
+#### 3. Reinstall MeloNX
+- Delete existing MeloNX installation
+- Sideload MeloNX again
+- Verify **Increased Memory Limit** is enabled in app
+
+#### 4. Setup Files
+- Add Encryption Keys and Firmware using the file picker inside MeloNX
+- Information for where to get these files are [here](#how-can-i-dump-my-firmwaregameskeys)
+
+#### 5. Enable JIT
+- Enable JIT using your preferred method, on iOS 26 [StikDebug](https://github.com/StephenDev0/StikDebug) is required.
+
+### Free Developer Account (Legacy, On-Device)
+
+> This Guide is out of date and not recommended unless REQUIRED. Please follow the recommended guide [here](#recommended-guide-(plumeimpactor)).
+
+> [SideStore](https://sidestore.io/) is recommended to Sideload MeloNX.
+
+#### **Make sure to read the FAQ and Info before continuing.**
+
+***The Entitlement App is **NOT** needed for AltStore Classic***
+- You may skip Step 2 and Step 3
+#### 1. Sideload Applications
+
+Download and install both apps using your preferred **APPLE ID** sideloader:
+- **MeloNX**: [Download from Releases](https://git.ryujinx.app/projects/MeloNX/releases)
+- **Entitlement App**: [Download IPA](https://github.com/hugeBlack/GetMoreRam/releases/download/nightly/GetMoreRam.ipa)
+#### 2. Enable Memory Entitlement
+
+> If the Entitlement / GetMoreRam app isn't working correctly, then try the new Plumeimpactor method.
+- Open the **Entitlement app** > **Settings**
+- Sign in with the same Apple ID you used to Sideload MeloNX.
+- Go to **App IDs** > tap **Refresh**
+- Select **MeloNX** (e.g., "com.stossy11.MeloNX.XXXXXX")
+- Tap **Add Increased Memory Limit**
+
+#### 3. Reinstall MeloNX
+- Delete existing MeloNX installation
+- Sideload MeloNX again
+- Verify **Increased Memory Limit** is enabled in app
+
+#### 4. Setup Files
+- Add Encryption Keys and Firmware using the file picker inside MeloNX
+- Information for where to get these files are [here](#how-can-i-dump-my-firmwaregameskeys)
+
+#### 5. Enable JIT
+- Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
 
 ## Features
 
- - **Audio**
-
-   Audio output is entirely supported, audio input (microphone) isn't supported. We use C# wrappers for [OpenAL](https://openal-soft.org/), and [SDL2](https://www.libsdl.org/) & [libsoundio](http://libsound.io/) as fallbacks.
-
-- **CPU**
-
-  The CPU emulator, ARMeilleure, emulates an ARMv8 CPU and currently has support for most 64-bit ARMv8 and some of the ARMv7 (and older) instructions, including partial 32-bit support. It translates the ARM code to a custom IR, performs a few optimizations, and turns that into x86 code.
-  There are three memory manager options available depending on the user's preference, leveraging both software-based (slower) and host-mapped modes (much faster). The fastest option (host, unchecked) is set by default.
-  Ryujinx also features an optional Profiled Persistent Translation Cache, which essentially caches translated functions so that they do not need to be translated every time the game loads. The net result is a significant reduction in load times (the amount of time between launching a game and arriving at the title screen) for nearly every game. NOTE: this feature is enabled by default in the Options menu > System tab. You must launch the game at least twice to the title screen or beyond before performance improvements are unlocked on the third launch! These improvements are permanent and do not require any extra launches going forward.
-
-- **GPU**
-
-  The GPU emulator emulates the Switch's Maxwell GPU using either the OpenGL (version 4.5 minimum), Vulkan, or Metal (via MoltenVK) APIs through a custom build of OpenTK or Silk.NET respectively. There are currently six graphics enhancements available to the end user in Ryujinx: Disk Shader Caching, Resolution Scaling, Anti-Aliasing, Scaling Filters (including FSR), Anisotropic Filtering and Aspect Ratio Adjustment. These enhancements can be adjusted or toggled as desired in the GUI.
-
-- **Input**
-
-   We currently have support for keyboard, mouse, touch input, JoyCon input support, and nearly all controllers. Motion controls are natively supported in most cases; for dual-JoyCon motion support, DS4Windows or BetterJoy are currently required.
-   In all scenarios, you can set up everything inside the input configuration menu.
-
-- **DLC & Modifications**
-
-   Ryujinx is able to manage add-on content/downloadable content through the GUI. Mods (romfs, exefs, and runtime mods such as cheats) are also supported; the GUI contains a shortcut to open the respective mods folder for a particular game.
-
-- **Configuration**
-
-   The emulator has settings for enabling or disabling some logging, remapping controllers, and more. You can configure all of them through the graphical interface or manually through the config file, `Config.json`, found in the user folder which can be accessed by clicking `Open Ryujinx Folder` under the File menu in the GUI.
+\- **Audio**<br>
+Audio output is entirely supported, audio input (microphone) isn't supported.
+We use C# wrappers for [OpenAL](https://openal-soft.org/), and [SDL2](https://www.libsdl.org/) & [libsoundio](http://libsound.io/) as fallbacks.
 
 
-## Contact
+\- **CPU**<br>
+The CPU emulator, ARMeilleure, emulates an ARMv8 CPU and currently has support for most 64-bit ARMv8 and some of the ARMv7 (and older) instructions, including partial 32-bit support.
+It translates the ARM code to a custom IR, performs a few optimizations, and turns that into x86 code.
+There are three memory manager options available depending on the user's preference, leveraging both software-based (slower) and host-mapped modes (much faster).
+The fastest option (host, unchecked) is set by default.
+Ryujinx also features an optional Profiled Persistent Translation Cache, which essentially caches translated functions so that they do not need to be translated every time the game loads.
+The net result is a significant reduction in load times (the amount of time between launching a game and arriving at the title screen) for nearly every game.
+NOTE: This feature is enabled by default, You must launch the game at least twice to the title screen or beyond before performance improvements are unlocked on the third launch!
+These improvements are permanent and do not require any extra launches going forward.
 
-If you have contributions, suggestions, need emulator support or just want to get in touch with the team, join our [Discord server](https://discord.com/invite/Ryujinx). You may also review our [FAQ](https://github.com/Ryujinx/Ryujinx/wiki/Frequently-Asked-Questions).
 
-## Donations
+\- **GPU**<br>
+The GPU emulator emulates the Switch's Maxwell GPU using Metal (via MoltenVK) APIs through a custom build of Silk.NET.
 
-If you'd like to support the project financially, Ryujinx has an active Patreon campaign.
 
-<a href="https://www.patreon.com/ryujinx">
-    <img src="https://images.squarespace-cdn.com/content/v1/560c1d39e4b0b4fae0c9cf2a/1567548955044-WVD994WZP76EWF15T0L3/Patreon+Button.png?format=500w" width="150">
-</a>
+\- **Input**<br>
+We currently have support for keyboard, touch input, JoyCon input support, and nearly all MFI controllers.
 
-All developers working on the project do so in their free time, but the project has several expenses:
-* Hackable Nintendo Switch consoles to reverse-engineer the hardware
-* Additional computer hardware for testing purposes (e.g. GPUs to diagnose graphical bugs, etc.)
-* Licenses for various software development tools (e.g. Jetbrains, IDA)
-* Web hosting and infrastructure maintenance (e.g. LDN servers)
+Motion controls are natively supported in most cases, however JoyCons do not have motion support due to an iOS limitation.
 
-All funds received through Patreon are considered a donation to support the project. Patrons receive early access to progress reports and exclusive access to developer interviews.
+Rumble is also natively supported in most cases.
 
-## License
 
-This software is licensed under the terms of the <a href="https://github.com/Ryujinx/Ryujinx/blob/master/LICENSE.txt" target="_blank">MIT license.</a></i><br />
+\- **DLC & Modifications**<br>
+MeloNX supports DLC + Game Update Add-ons.<br>
+Mods (romfs, exefs, and runtime mods such as cheats) are unsupported; but may work. 
+
+
+\- **Configuration**<br>
+The emulator has settings for enabling or disabling logging, remapping controllers, resolution settings, Shader Cache and more.
+
+# Notice
+This project does not distribute, include, or endorse any copyrighted or pirated content. The software is provided for legitimate and lawful use.
+
+Users are solely responsible for ensuring that any copyrighted material they use with this software (including, but not limited to, ROMs, cryptographic keys, and firmware) is obtained legally and in accordance with applicable law. The developers disclaim all responsibility for any misuse of the software or for any legal consequences resulting from the use of illegally obtained content.
+
+Any third-party distribution of this emulator bundled with copyrighted content (including, but not limited to, ROMs, cryptographic keys, and firmware) is done without permission and is not associated with orendorsed by this project.
+
+Nintendo Switch is a trademark of Nintendo Co., Ltd.
+Nintendo is a trademark of Nintendo Co., Ltd.
+Pokémon is a trademark of Nintendo/Creatures Inc./Game Freak Inc.
+Animal Crossing is a trademark of Nintendo Co., Ltd.
+
+This project is an independent, third-party work and is not affiliated with, endorsed by, or associated with Nintendo Co., Ltd., any of its subsidiaries, or any other console manufacturer or game and/or game publisher.
+
+# License
+This software is licensed under the terms of the [GPLv3 license](LICENSE.txt).
+
 This project makes use of code authored by the libvpx project, licensed under BSD and the ffmpeg project, licensed under LGPLv3.
-See [LICENSE.txt](LICENSE.txt) and [THIRDPARTY.md](distribution/legal/THIRDPARTY.md) for more details.
-## Credits
 
+See [LICENSE.txt](LICENSE.txt) and [THIRDPARTY.md](distribution/legal/THIRDPARTY.md) for more details.
+
+# Credits
+- [Ryujinx](https://git.ryujinx.app/ryubing/ryujinx) the base of MeloNX (Thank you Ryubing!)
 - [LibHac](https://github.com/Thealexbarney/LibHac) is used for our file-system.
 - [AmiiboAPI](https://www.amiiboapi.com) is used in our Amiibo emulation.
 - [ldn_mitm](https://github.com/spacemeowx2/ldn_mitm) is used for one of our available multiplayer modes.

@@ -3,11 +3,10 @@ using Ryujinx.HLE.HOS.Ipc;
 using Ryujinx.HLE.HOS.Kernel.Threading;
 using Ryujinx.Horizon.Common;
 using System;
-using System.Buffers;
 
 namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 {
-    abstract class IHOSBinderDriver : IpcService
+    abstract partial class IHOSBinderDriver : IpcService
     {
         public IHOSBinderDriver() { }
 
@@ -85,9 +84,9 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
 
             ReadOnlySpan<byte> inputParcel = context.Memory.GetSpan(dataPos, (int)dataSize);
 
-            using IMemoryOwner<byte> outputParcelOwner = ByteMemoryPool.RentCleared(replySize);
+            using SpanOwner<byte> outputParcelOwner = SpanOwner<byte>.RentCleared(checked((int)replySize));
 
-            Span<byte> outputParcel = outputParcelOwner.Memory.Span;
+            Span<byte> outputParcel = outputParcelOwner.Span;
 
             ResultCode result = OnTransact(binderId, code, flags, inputParcel, outputParcel);
 

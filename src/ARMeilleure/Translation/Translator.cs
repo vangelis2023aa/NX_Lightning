@@ -5,7 +5,6 @@ using ARMeilleure.Diagnostics;
 using ARMeilleure.Instructions;
 using ARMeilleure.IntermediateRepresentation;
 using ARMeilleure.Memory;
-using ARMeilleure.Signal;
 using ARMeilleure.State;
 using ARMeilleure.Translation.Cache;
 using ARMeilleure.Translation.PTC;
@@ -22,33 +21,13 @@ namespace ARMeilleure.Translation
 {
     public class Translator
     {
-        private static readonly AddressTable<ulong>.Level[] _levels64Bit =
-            new AddressTable<ulong>.Level[]
-            {
-                new(31, 17),
-                new(23,  8),
-                new(15,  8),
-                new( 7,  8),
-                new( 2,  5),
-            };
-
-        private static readonly AddressTable<ulong>.Level[] _levels32Bit =
-            new AddressTable<ulong>.Level[]
-            {
-                new(31, 17),
-                new(23,  8),
-                new(15,  8),
-                new( 7,  8),
-                new( 1,  6),
-            };
-
         private readonly IJitMemoryAllocator _allocator;
         private readonly ConcurrentQueue<KeyValuePair<ulong, TranslatedFunction>> _oldFuncs;
 
         private readonly Ptc _ptc;
 
         internal TranslatorCache<TranslatedFunction> Functions { get; }
-        internal AddressTable<ulong> FunctionTable { get; }
+        internal IAddressTable<ulong> FunctionTable { get; }
         internal EntryTable<uint> CountTable { get; }
         internal TranslatorStubs Stubs { get; }
         internal TranslatorQueue Queue { get; }
@@ -57,10 +36,7 @@ namespace ARMeilleure.Translation
         private Thread[] _backgroundTranslationThreads;
         private volatile int _threadCount;
 
-        // FIXME: Remove this once the init logic of the emulator will be redone.
-        public static readonly ManualResetEvent IsReadyForTranslation = new(false);
-
-        public Translator(IJitMemoryAllocator allocator, IMemoryManager memory, bool for64Bits)
+        public Translator(IJitMemoryAllocator allocator, IMemoryManager memory, IAddressTable<ulong> functionTable)
         {
             _allocator = allocator;
             Memory = memory;
@@ -75,20 +51,15 @@ namespace ARMeilleure.Translation
 
             CountTable = new EntryTable<uint>();
             Functions = new TranslatorCache<TranslatedFunction>();
-            FunctionTable = new AddressTable<ulong>(for64Bits ? _levels64Bit : _levels32Bit);
+            FunctionTable = functionTable;
             Stubs = new TranslatorStubs(FunctionTable);
 
             FunctionTable.Fill = (ulong)Stubs.SlowDispatchStub;
-
-            if (memory.Type.IsHostMappedOrTracked())
-            {
-                NativeSignalHandler.InitializeSignalHandler(allocator.GetPageSize());
-            }
         }
 
-        public IPtcLoadState LoadDiskCache(string titleIdText, string displayVersion, bool enabled)
+        public IPtcLoadState LoadDiskCache(string titleIdText, string displayVersion, bool enabled, string cacheSelector)
         {
-            _ptc.Initialize(titleIdText, displayVersion, enabled, Memory.Type);
+            _ptc.Initialize(titleIdText, displayVersion, enabled, Memory.Type, cacheSelector);
             return _ptc;
         }
 
@@ -105,15 +76,11 @@ namespace ARMeilleure.Translation
         {
             if (Interlocked.Increment(ref _threadCount) == 1)
             {
-                IsReadyForTranslation.WaitOne();
-
                 if (_ptc.State == PtcState.Enabled)
                 {
                     Debug.Assert(Functions.Count == 0);
                     _ptc.LoadTranslations(this);
                     _ptc.MakeAndSaveTranslations(this);
-
-                    JitCache.RunDeferredRxProtects();
                 }
 
                 _ptc.Profiler.Start();
@@ -152,7 +119,25 @@ namespace ARMeilleure.Translation
 
             NativeInterface.RegisterThread(context, Memory, this);
 
-            if (Optimizations.UseUnmanagedDispatchLoop)
+            if (Optimizations.EnableDebugging)
+            {
+                context.DebugPc = address;
+                do
+                {
+                    if (Interlocked.CompareExchange(ref context.ShouldStep, 0, 1) == 1)
+                    {
+                        context.DebugPc = Step(context, context.DebugPc);
+                        context.StepHandler();
+                    }
+                    else
+                    {
+                        context.DebugPc = ExecuteSingle(context, context.DebugPc);
+                    }
+                    context.CheckInterrupt();
+                }
+                while (context.Running && context.DebugPc != 0);
+            }
+            else if (Optimizations.UseUnmanagedDispatchLoop)
             {
                 Stubs.DispatchLoop(context.NativeContextPtr, address);
             }
@@ -201,6 +186,7 @@ namespace ARMeilleure.Translation
 
             Statistics.StartTimer();
 
+            context.ResetCallDepth();
             ulong nextAddr = func.Execute(Stubs.ContextWrapper, context);
 
             Statistics.StopTimer(address);
@@ -208,7 +194,7 @@ namespace ARMeilleure.Translation
             return nextAddr;
         }
 
-        public ulong Step(State.ExecutionContext context, ulong address)
+        private ulong Step(State.ExecutionContext context, ulong address)
         {
             TranslatedFunction func = Translate(address, context.ExecutionMode, highCq: false, singleStep: true);
 
@@ -218,6 +204,8 @@ namespace ARMeilleure.Translation
 
             return address;
         }
+
+
 
         internal TranslatedFunction GetOrTranslate(ulong address, ExecutionMode mode)
         {
@@ -252,9 +240,9 @@ namespace ARMeilleure.Translation
             }
         }
 
-        internal TranslatedFunction Translate(ulong address, ExecutionMode mode, bool highCq, bool singleStep = false, bool deferProtect = false)
+        internal TranslatedFunction Translate(ulong address, ExecutionMode mode, bool highCq, bool singleStep = false, bool pptcTranslation = false)
         {
-            var context = new ArmEmitterContext(
+            ArmEmitterContext context = new(
                 Memory,
                 CountTable,
                 FunctionTable,
@@ -262,7 +250,8 @@ namespace ARMeilleure.Translation
                 address,
                 highCq,
                 _ptc.State != PtcState.Disabled,
-                mode: Aarch32Mode.User);
+                mode: Aarch32Mode.User,
+                isSingleStep: singleStep);
 
             Logger.StartPass(PassName.Decoding);
 
@@ -272,6 +261,7 @@ namespace ARMeilleure.Translation
 
             Logger.StartPass(PassName.Translation);
 
+            InstEmitFlowHelper.EmitCallDepthCheckAndIncrement(context, Const(address));
             EmitSynchronization(context);
 
             if (blocks[0].Address != address)
@@ -279,7 +269,12 @@ namespace ARMeilleure.Translation
                 context.Branch(context.GetLabel(address));
             }
 
-            ControlFlowGraph cfg = EmitAndGetCFG(context, blocks, out Range funcRange, out Counter<uint> counter);
+            ControlFlowGraph cfg = EmitAndGetCFG(context, blocks, out Range funcRange, out Counter<uint> counter, pptcTranslation);
+
+            if (cfg == null)
+            {
+                return null;
+            }
 
             ulong funcSize = funcRange.End - funcRange.Start;
 
@@ -291,10 +286,10 @@ namespace ARMeilleure.Translation
 
             Logger.EndPass(PassName.RegisterUsage);
 
-            var retType = OperandType.I64;
-            var argTypes = new OperandType[] { OperandType.I64 };
+            OperandType retType = OperandType.I64;
+            OperandType[] argTypes = [OperandType.I64];
 
-            var options = highCq ? CompilerOptions.HighCq : CompilerOptions.None;
+            CompilerOptions options = highCq ? CompilerOptions.HighCq : CompilerOptions.None;
 
             if (context.HasPtc && !singleStep)
             {
@@ -310,7 +305,7 @@ namespace ARMeilleure.Translation
                 _ptc.WriteCompiledFunction(address, funcSize, hash, highCq, compiledFunc);
             }
 
-            GuestFunction func = compiledFunc.MapWithPointer<GuestFunction>(out IntPtr funcPointer, deferProtect);
+            GuestFunction func = compiledFunc.MapWithPointer<GuestFunction>(out nint funcPointer);
 
             Allocators.ResetAll();
 
@@ -354,7 +349,8 @@ namespace ARMeilleure.Translation
             ArmEmitterContext context,
             Block[] blocks,
             out Range range,
-            out Counter<uint> counter)
+            out Counter<uint> counter,
+            bool pptcTranslation)
         {
             counter = null;
 
@@ -394,9 +390,13 @@ namespace ARMeilleure.Translation
 
                 if (block.Exit)
                 {
-                    // Left option here as it may be useful if we need to return to managed rather than tail call in
-                    // future. (eg. for debug)
-                    bool useReturns = false;
+                    // Return to managed rather than tail call.
+                    bool useReturns = Optimizations.EnableDebugging;
+
+                    if (Optimizations.EnableDebugging)
+                    {
+                        EmitDebugPrecisePcUpdate(context, block.Address);
+                    }
 
                     InstEmitFlowHelper.EmitVirtualJump(context, Const(block.Address), isReturn: useReturns);
                 }
@@ -414,10 +414,15 @@ namespace ARMeilleure.Translation
                         {
                             context.SyncQcFlag();
 
-                            if (block.Branch != null && !block.Branch.Exit && block.Branch.Address <= block.Address)
+                            if (block.Branch is { Exit: false } && block.Branch.Address <= block.Address)
                             {
                                 EmitSynchronization(context);
                             }
+                        }
+
+                        if (Optimizations.EnableDebugging)
+                        {
+                            EmitDebugPrecisePcUpdate(context, opCode.Address);
                         }
 
                         Operand lblPredicateSkip = default;
@@ -426,19 +431,27 @@ namespace ARMeilleure.Translation
                         {
                             lblPredicateSkip = Label();
 
-                            InstEmitFlowHelper.EmitCondBranch(context, lblPredicateSkip, context.CurrentIfThenBlockCond.Invert());
+                            InstEmitFlowHelper.EmitCondBranch(context, lblPredicateSkip, context.CurrentIfThenBlockCond.Inverse);
                         }
 
-                        if (opCode is OpCode32 op && op.Cond < Condition.Al)
+                        if (opCode is OpCode32 { Cond: < Condition.Al } op)
                         {
                             lblPredicateSkip = Label();
 
-                            InstEmitFlowHelper.EmitCondBranch(context, lblPredicateSkip, op.Cond.Invert());
+                            InstEmitFlowHelper.EmitCondBranch(context, lblPredicateSkip, op.Cond.Inverse);
                         }
 
                         if (opCode.Instruction.Emitter != null)
                         {
                             opCode.Instruction.Emitter(context);
+                            // if we're pre-compiling PPTC functions, and we hit an Undefined instruction as the first
+                            // instruction in the block, mark the function as blacklisted
+                            // this way, we don't pre-compile Exlaunch hooks, which allows ExeFS mods to run with PPTC 
+                            if (pptcTranslation && opCode.Instruction.Name == InstName.Und && blkIndex == 0)
+                            {
+                                range = new Range(rangeStart, rangeEnd);
+                                return null;
+                            }
                         }
                         else
                         {
@@ -508,9 +521,17 @@ namespace ARMeilleure.Translation
             context.MarkLabel(lblExit);
         }
 
+        internal static void EmitDebugPrecisePcUpdate(EmitterContext context, ulong address)
+        {
+            long debugPrecisePcOffs = NativeContext.GetDebugPrecisePcOffset();
+
+            Operand debugPrecisePcAddr = context.Add(context.LoadArgument(OperandType.I64, 0), Const(debugPrecisePcOffs));
+            context.Store(debugPrecisePcAddr, Const(address));
+        }
+
         public void InvalidateJitCacheRegion(ulong address, ulong size)
         {
-            ulong[] overlapAddresses = Array.Empty<ulong>();
+            ulong[] overlapAddresses = [];
 
             int overlapsCount = Functions.GetOverlaps(address, size, ref overlapAddresses);
 
@@ -553,7 +574,7 @@ namespace ARMeilleure.Translation
 
             List<TranslatedFunction> functions = Functions.AsList();
 
-            foreach (var func in functions)
+            foreach (TranslatedFunction func in functions)
             {
                 JitCache.Unmap(func.FuncPointer);
 
@@ -562,7 +583,7 @@ namespace ARMeilleure.Translation
 
             Functions.Clear();
 
-            while (_oldFuncs.TryDequeue(out var kv))
+            while (_oldFuncs.TryDequeue(out KeyValuePair<ulong, TranslatedFunction> kv))
             {
                 JitCache.Unmap(kv.Value.FuncPointer);
 
@@ -583,7 +604,7 @@ namespace ARMeilleure.Translation
             {
                 while (Queue.Count > 0 && Queue.TryDequeue(out RejitRequest request))
                 {
-                    if (Functions.TryGetValue(request.Address, out var func) && func.CallCounter != null)
+                    if (Functions.TryGetValue(request.Address, out TranslatedFunction func) && func.CallCounter != null)
                     {
                         Volatile.Write(ref func.CallCounter.Value, 0);
                     }

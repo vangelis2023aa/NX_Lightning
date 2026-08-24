@@ -18,12 +18,12 @@ namespace Ryujinx.Graphics.Vulkan
 
             for (int index = 0; index < TotalSets; index++)
             {
-                _resourceDescriptors[index] = new();
-                _resourceUsages[index] = new();
+                _resourceDescriptors[index] = [];
+                _resourceUsages[index] = [];
             }
         }
 
-        public ResourceLayoutBuilder Add(ResourceStages stages, ResourceType type, int binding)
+        public ResourceLayoutBuilder Add(ResourceStages stages, ResourceType type, int binding, bool write = false)
         {
             int setIndex = type switch
             {
@@ -35,15 +35,15 @@ namespace Ryujinx.Graphics.Vulkan
             };
 
             _resourceDescriptors[setIndex].Add(new ResourceDescriptor(binding, 1, type, stages));
-            _resourceUsages[setIndex].Add(new ResourceUsage(binding, type, stages));
+            _resourceUsages[setIndex].Add(new ResourceUsage(binding, 1, type, stages, write));
 
             return this;
         }
 
         public ResourceLayout Build()
         {
-            var descriptors = new ResourceDescriptorCollection[TotalSets];
-            var usages = new ResourceUsageCollection[TotalSets];
+            ResourceDescriptorCollection[] descriptors = new ResourceDescriptorCollection[TotalSets];
+            ResourceUsageCollection[] usages = new ResourceUsageCollection[TotalSets];
 
             for (int index = 0; index < TotalSets; index++)
             {

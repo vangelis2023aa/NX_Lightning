@@ -43,7 +43,7 @@ namespace ARMeilleure.Instructions
             }
             else
             {
-                EmitScalarUnaryOpF32(context, (op1) => EmitUnaryMathCall(context, nameof(Math.Abs), op1));
+                EmitScalarUnaryOpF32(context, (op1) => EmitUnaryMathCall(context, nameof(MathHelper.Abs), op1));
             }
         }
 
@@ -66,7 +66,7 @@ namespace ARMeilleure.Instructions
                 }
                 else
                 {
-                    EmitVectorUnaryOpF32(context, (op1) => EmitUnaryMathCall(context, nameof(Math.Abs), op1));
+                    EmitVectorUnaryOpF32(context, (op1) => EmitUnaryMathCall(context, nameof(MathHelper.Abs), op1));
                 }
             }
             else
@@ -231,10 +231,12 @@ namespace ARMeilleure.Instructions
             {
                 result |= (long)((i >= end || i < start) ? 0x80 : b++) << (i * 8);
             }
+
             for (int i = 8; i < 16; i++)
             {
                 result2 |= (long)((i >= end || i < start) ? 0x80 : b++) << ((i - 8) * 8);
             }
+
             return (result2, result);
         }
 
@@ -261,6 +263,7 @@ namespace ARMeilleure.Instructions
                         nMaskHigh = nMaskLow + 0x0808080808080808L;
                         mMaskHigh = mMaskLow + 0x0808080808080808L;
                     }
+
                     nMask = X86GetElements(context, nMaskHigh, nMaskLow);
                     mMask = X86GetElements(context, mMaskHigh, mMaskLow);
                     Operand nPart = context.AddIntrinsic(Intrinsic.X86Pshufb, n, nMask);
@@ -285,6 +288,7 @@ namespace ARMeilleure.Instructions
                     {
                         extract = EmitVectorExtractZx32(context, op.Qn, op.In + byteOff, op.Size);
                     }
+
                     byteOff++;
 
                     res = EmitVectorInsert(context, res, extract, op.Id + index, op.Size);
@@ -1115,6 +1119,13 @@ namespace ARMeilleure.Instructions
             }
         }
 
+        public static void Vpadal(ArmEmitterContext context)
+        {
+            OpCode32Simd op = (OpCode32Simd)context.CurrOp;
+
+            EmitVectorPairwiseTernaryLongOpI32(context, (op1, op2, op3) => context.Add(context.Add(op1, op2), op3), op.Opc != 1);
+        }
+
         public static void Vpaddl(ArmEmitterContext context)
         {
             OpCode32Simd op = (OpCode32Simd)context.CurrOp;
@@ -1239,6 +1250,33 @@ namespace ARMeilleure.Instructions
             EmitVectorUnaryNarrowOp32(context, (op1) => EmitSatQ(context, op1, 8 << op.Size, signedSrc: true, signedDst: false), signed: true);
         }
 
+        public static void Vqrdmulh(ArmEmitterContext context)
+        {
+            OpCode32SimdReg op = (OpCode32SimdReg)context.CurrOp;
+            int eSize = 8 << op.Size;
+
+            EmitVectorBinaryOpI32(context, (op1, op2) =>
+            {
+                if (op.Size == 2)
+                {
+                    op1 = context.SignExtend32(OperandType.I64, op1);
+                    op2 = context.SignExtend32(OperandType.I64, op2);
+                }
+
+                Operand res = context.Multiply(op1, op2);
+                res = context.Add(res, Const(res.Type, 1L << (eSize - 2)));
+                res = context.ShiftRightSI(res, Const(eSize - 1));
+                res = EmitSatQ(context, res, eSize, signedSrc: true, signedDst: true);
+
+                if (op.Size == 2)
+                {
+                    res = context.ConvertI64ToI32(res);
+                }
+
+                return res;
+            }, signed: true);
+        }
+
         public static void Vqsub(ArmEmitterContext context)
         {
             OpCode32SimdReg op = (OpCode32SimdReg)context.CurrOp;
@@ -1270,6 +1308,7 @@ namespace ARMeilleure.Instructions
                                 case 2:
                                     return context.AddIntrinsic(Intrinsic.X86Shufps, op1, op1, Const(1 | (0 << 2) | (3 << 4) | (2 << 6)));
                             }
+
                             break;
                         case 2:
                             // Rev32
@@ -1282,6 +1321,7 @@ namespace ARMeilleure.Instructions
                                     mask = X86GetElements(context, 0x0d0c0f0e_09080b0aL, 0x05040706_01000302L);
                                     return context.AddIntrinsic(Intrinsic.X86Pshufb, op1, mask);
                             }
+
                             break;
                         case 1:
                             // Rev16
@@ -1307,6 +1347,7 @@ namespace ARMeilleure.Instructions
                                 case 3:
                                     return context.ByteSwap(op1);
                             }
+
                             break;
                         case 1:
                             switch (op.Size)
@@ -1321,6 +1362,7 @@ namespace ARMeilleure.Instructions
                                         context.BitwiseOr(context.ShiftRightUI(context.BitwiseAnd(op1, Const(0x0000ffff00000000ul)), Const(16)),
                                                              context.ShiftLeft(context.BitwiseAnd(op1, Const(0x00000000ffff0000ul)), Const(16))));
                             }
+
                             break;
                         case 2:
                             // Swap upper and lower halves.

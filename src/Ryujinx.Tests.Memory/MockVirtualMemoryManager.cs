@@ -1,13 +1,14 @@
 using Ryujinx.Memory;
 using Ryujinx.Memory.Range;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 
 namespace Ryujinx.Tests.Memory
 {
     public class MockVirtualMemoryManager : IVirtualMemoryManager
     {
-        public bool Supports4KBPages => true;
+        public bool UsesPrivateAllocations => false;
 
         public bool NoMappings = false;
 
@@ -41,6 +42,11 @@ namespace Ryujinx.Tests.Memory
         {
             throw new NotImplementedException();
         }
+        
+        public bool TryReadUnsafe(ulong va, int lenfth, out Span<byte> data)
+        {
+            throw new NotImplementedException();
+        }
 
         public void Write<T>(ulong va, T value) where T : unmanaged
         {
@@ -53,6 +59,11 @@ namespace Ryujinx.Tests.Memory
         }
 
         public bool WriteWithRedundancyCheck(ulong va, ReadOnlySpan<byte> data)
+        {
+            throw new NotImplementedException();
+        }
+
+        public ReadOnlySequence<byte> GetReadOnlySequence(ulong va, int size, bool tracked = false)
         {
             throw new NotImplementedException();
         }
@@ -79,7 +90,7 @@ namespace Ryujinx.Tests.Memory
 
         IEnumerable<MemoryRange> IVirtualMemoryManager.GetPhysicalRegions(ulong va, ulong size)
         {
-            return NoMappings ? Array.Empty<MemoryRange>() : new MemoryRange[] { new MemoryRange(va, size) };
+            return NoMappings ? Array.Empty<MemoryRange>() : new MemoryRange[] { new(va, size) };
         }
 
         public bool IsMapped(ulong va)
@@ -107,7 +118,7 @@ namespace Ryujinx.Tests.Memory
             throw new NotImplementedException();
         }
 
-        public void TrackingReprotect(ulong va, ulong size, MemoryPermission protection)
+        public void TrackingReprotect(ulong va, ulong size, MemoryPermission protection, bool guest)
         {
             OnProtect?.Invoke(va, size, protection);
         }

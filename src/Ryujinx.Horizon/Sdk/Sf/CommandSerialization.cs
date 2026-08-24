@@ -2,6 +2,7 @@ using Ryujinx.Horizon.Sdk.Sf.Cmif;
 using Ryujinx.Horizon.Sdk.Sf.Hipc;
 using Ryujinx.Memory;
 using System;
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -9,6 +10,11 @@ namespace Ryujinx.Horizon.Sdk.Sf
 {
     static class CommandSerialization
     {
+        public static ReadOnlySequence<byte> GetReadOnlySequence(PointerAndSize bufferRange)
+        {
+            return HorizonStatic.AddressSpace.GetReadOnlySequence(bufferRange.Address, checked((int)bufferRange.Size));
+        }
+
         public static ReadOnlySpan<byte> GetReadOnlySpan(PointerAndSize bufferRange)
         {
             return HorizonStatic.AddressSpace.GetSpan(bufferRange.Address, checked((int)bufferRange.Size));
@@ -21,7 +27,7 @@ namespace Ryujinx.Horizon.Sdk.Sf
 
         public static ref T GetRef<T>(PointerAndSize bufferRange) where T : unmanaged
         {
-            var writableRegion = GetWritableRegion(bufferRange);
+            WritableRegion writableRegion = GetWritableRegion(bufferRange);
 
             return ref MemoryMarshal.Cast<byte, T>(writableRegion.Memory.Span)[0];
         }

@@ -2,7 +2,6 @@ using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 
 namespace Ryujinx.Graphics.Vulkan.Queries
@@ -24,7 +23,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         private ulong _accumulatedCounter;
         private int _waiterCount;
 
-        private readonly object _lock = new();
+        private readonly Lock _lock = new();
 
         private readonly Queue<BufferedQuery> _queryPool;
         private readonly AutoResetEvent _queuedEvent = new(false);
@@ -52,7 +51,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
             _current = new CounterQueueEvent(this, type, 0);
 
-            _consumerThread = new Thread(EventConsumer);
+            _consumerThread = new Thread(EventConsumer) { Name = "CPU.CounterQueue." + (int)type };
             _consumerThread.Start();
         }
 
@@ -67,9 +66,18 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             lock (_queryPool)
             {
                 count = Math.Min(count, _queryPool.Count);
-                for (int i = 0; i < count; i++)
+
+                if (count > 0)
                 {
-                    _queryPool.ElementAt(i).PoolReset(cmd, ResetSequence);
+                    foreach (BufferedQuery query in _queryPool)
+                    {
+                        query.PoolReset(cmd, ResetSequence);
+
+                        if (--count == 0)
+                        {
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -190,6 +198,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                     {
                         return; // If not blocking, then return when we encounter an event that is not ready yet.
                     }
+
                     _events.Dequeue();
                 }
             }

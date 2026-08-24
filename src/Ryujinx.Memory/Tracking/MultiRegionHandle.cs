@@ -37,7 +37,8 @@ namespace Ryujinx.Memory.Tracking
             ulong size,
             IEnumerable<IRegionHandle> handles,
             ulong granularity,
-            int id)
+            int id,
+            RegionFlags flags)
         {
             _handles = new RegionHandle[(size + granularity - 1) / granularity];
             Granularity = granularity;
@@ -62,7 +63,7 @@ namespace Ryujinx.Memory.Tracking
                     // Fill any gap left before this handle.
                     while (i < startIndex)
                     {
-                        RegionHandle fillHandle = tracking.BeginTrackingBitmap(address + (ulong)i * granularity, granularity, _dirtyBitmap, i, id);
+                        RegionHandle fillHandle = tracking.BeginTrackingBitmap(address + (ulong)i * granularity, granularity, _dirtyBitmap, i, id, flags);
                         fillHandle.Parent = this;
                         _handles[i++] = fillHandle;
                     }
@@ -83,7 +84,7 @@ namespace Ryujinx.Memory.Tracking
 
                             while (i < endIndex)
                             {
-                                RegionHandle splitHandle = tracking.BeginTrackingBitmap(address + (ulong)i * granularity, granularity, _dirtyBitmap, i, id);
+                                RegionHandle splitHandle = tracking.BeginTrackingBitmap(address + (ulong)i * granularity, granularity, _dirtyBitmap, i, id, flags);
                                 splitHandle.Parent = this;
 
                                 splitHandle.Reprotect(handle.Dirty);
@@ -106,7 +107,7 @@ namespace Ryujinx.Memory.Tracking
             // Fill any remaining space with new handles.
             while (i < _handles.Length)
             {
-                RegionHandle handle = tracking.BeginTrackingBitmap(address + (ulong)i * granularity, granularity, _dirtyBitmap, i, id);
+                RegionHandle handle = tracking.BeginTrackingBitmap(address + (ulong)i * granularity, granularity, _dirtyBitmap, i, id, flags);
                 handle.Parent = this;
                 _handles[i++] = handle;
             }
@@ -122,10 +123,7 @@ namespace Ryujinx.Memory.Tracking
             Dirty = true;
         }
 
-        public IEnumerable<RegionHandle> GetHandles()
-        {
-            return _handles;
-        }
+        public IEnumerable<RegionHandle> Handles => _handles;
 
         public void ForceDirty(ulong address, ulong size)
         {
@@ -281,6 +279,7 @@ namespace Ryujinx.Memory.Tracking
                         modifiedAction(rgStart, rgSize);
                         rgSize = 0;
                     }
+
                     rgStart = handle.RealAddress;
                 }
 
@@ -319,7 +318,7 @@ namespace Ryujinx.Memory.Tracking
 
             if (startHandle == lastHandle)
             {
-                var handle = _handles[startHandle];
+                RegionHandle handle = _handles[startHandle];
                 if (_sequenceNumberBitmap.Set(startHandle))
                 {
                     _uncheckedHandles--;
@@ -409,7 +408,7 @@ namespace Ryujinx.Memory.Tracking
         {
             GC.SuppressFinalize(this);
 
-            foreach (var handle in _handles)
+            foreach (RegionHandle handle in _handles)
             {
                 handle.Dispose();
             }
