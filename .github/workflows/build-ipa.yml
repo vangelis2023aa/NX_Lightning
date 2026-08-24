@@ -1,77 +1,138 @@
-name: Build NXLightning IPA
+name: Build iOS IPA (NXLightning)
+
+# Builds the unsigned NXLightning .ipa the same way the local pipeline does, so a green
+# run here means the source + project settings actually compile and archive on iOS.
+#
+# Pipeline (order matters):
+#   1. dotnet publish src/Ryujinx.Library for ios-arm64 (NativeAOT, self-contained).
+#      This is exactly what distribution/ios/build.sh runs. The resulting
+#      Ryujinx.Library.dylib lands at
+#        src/Ryujinx.Library/bin/Release/net10.0/ios-arm64/native/Ryujinx.Library.dylib
+#      which is the static path the Xcode project links it from (it is NOT built by an
+#      Xcode Run Script phase), so it must exist before xcodebuild runs.
+#   2. xcodebuild archive the shared "MeloNX" scheme with code signing disabled.
+#   3. Package the produced NXLightning.app into an unsigned Payload/NXLightning.ipa
+#      (sideload/AltStore-style; sign later on-device or with your own cert).
+#   4. Assert the bundle id is com.vangelis.NXLightning and the app name is NXLightning.
+#
+# The native runtime deps (SDL3.xcframework, BreakpointJIT.framework, libMoltenVK.dylib,
+# ffmpeg xcframeworks) are committed under src/MeloNX/MeloNX/Dependencies and are plain
+# files (no Git LFS), so a normal checkout is sufficient.
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}   # run manually from the Actions tab
+  push:
+    branches: [ "**" ]
+  pull_request: {}
+  # NOTE: macOS runners are billed at a higher rate and this job is slow (NativeAOT + archive).
+  # If that matters, narrow the triggers above (e.g. only workflow_dispatch + specific branches).
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+  POWERSHELL_TELEMETRY_OPTOUT: 1
+  CONFIGURATION: Release
+  SCHEME: MeloNX               # shared scheme in MeloNX.xcodeproj (unchanged by the rename)
+  PRODUCT_NAME: NXLightning     # PRODUCT_NAME -> NXLightning.app / NXLightning.ipa
+  BUNDLE_ID: com.vangelis.NXLightning
 
 jobs:
-  build:
+  build-ipa:
+    name: Build unsigned iOS IPA
     runs-on: macos-latest
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET 10.0.400
+      # The runner's default Xcode is used. If you depend on the iOS 26 SDK and the default
+      # is too old, pin it by uncommenting this step and setting a version the runner image
+      # actually provides.
+      # - name: Select Xcode
+      #   uses: maxim-lobanov/setup-xcode@v1
+      #   with:
+      #     xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      - name: Setup .NET (from global.json)
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.400'
+          global-json-file: global.json
 
-      - name: Build unsigned archive (Debug)
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/global.json', '**/*.csproj', '**/Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Install .NET iOS workload
+        # Required for the ios-arm64 NativeAOT runtime pack + cross toolchain.
+        run: dotnet workload install ios
+
+      - name: Publish Ryujinx.Library (ios-arm64, NativeAOT)
+        # Identical to distribution/ios/build.sh; output goes to the path the Xcode project links.
+        run: bash distribution/ios/build.sh
+
+      - name: Verify native library was produced
         run: |
+          DYLIB="src/Ryujinx.Library/bin/${CONFIGURATION}/net10.0/ios-arm64/native/Ryujinx.Library.dylib"
+          if [ ! -f "$DYLIB" ]; then
+            echo "::error::Expected native library not found at $DYLIB"
+            find src/Ryujinx.Library/bin -name 'Ryujinx.Library.dylib' 2>/dev/null || true
+            exit 1
+          fi
+          file "$DYLIB"
+
+      - name: Archive app (unsigned)
+        run: |
+          set -o pipefail
           xcodebuild archive \
             -project src/MeloNX/MeloNX.xcodeproj \
-            -scheme MeloNX \
-            -sdk iphoneos \
-            -configuration Debug \
-            -archivePath "$RUNNER_TEMP/NXLightning.xcarchive" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            SWIFT_OPTIMIZATION_LEVEL=-Onone
+            DEVELOPMENT_TEAM=""
 
-      - name: Verify app identity
+      - name: Verify bundle identity
         run: |
-          APP_PATH="$RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/NXLightning.app"
-
-          if [ ! -d "$APP_PATH" ]; then
-            echo "ERROR: NXLightning.app was not found."
-            echo "Applications found:"
-            find "$RUNNER_TEMP/NXLightning.xcarchive/Products/Applications" -maxdepth 1 -type d -print
+          APP="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::Built app not found at $APP"
+            ls -la "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications" 2>/dev/null || true
             exit 1
           fi
+          PLIST="$APP/Info.plist"
+          GOT_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST")
+          GOT_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST")
+          echo "CFBundleIdentifier = $GOT_ID"
+          echo "CFBundleName       = $GOT_NAME"
+          [ "$GOT_ID" = "$BUNDLE_ID" ] || { echo "::error::Bundle ID mismatch (expected $BUNDLE_ID, got $GOT_ID)"; exit 1; }
+          [ "$GOT_NAME" = "$PRODUCT_NAME" ] || { echo "::error::Product name mismatch (expected $PRODUCT_NAME, got $GOT_NAME)"; exit 1; }
 
-          echo "App found: $APP_PATH"
-
-          INFO_PLIST="$APP_PATH/Info.plist"
-
-          echo "Bundle identifier:"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
-
-          echo "Bundle display name:"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$INFO_PLIST" 2>/dev/null || true
-
-          echo "Bundle name:"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$INFO_PLIST" 2>/dev/null || true
-
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST")
-
-          if [ "$BUNDLE_ID" != "com.vangelis.NXLightning" ]; then
-            echo "ERROR: Unexpected bundle identifier: $BUNDLE_ID"
-            exit 1
-          fi
-
-      - name: Create IPA
+      - name: Package unsigned IPA
         run: |
-          rm -rf Payload
-          mkdir -p Payload
-
-          cp -R "$RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/NXLightning.app" Payload/
-
-          cd Payload
-          zip -r "$RUNNER_TEMP/NXLightning-unsigned.ipa" NXLightning.app
+          APP="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          ( cd "$RUNNER_TEMP" && zip -qr -y "$PRODUCT_NAME.ipa" Payload )
+          echo "IPA_PATH=$RUNNER_TEMP/$PRODUCT_NAME.ipa" >> "$GITHUB_ENV"
+          ls -lh "$RUNNER_TEMP/$PRODUCT_NAME.ipa"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: NXLightning-IPA
-          path: ${{ runner.temp }}/NXLightning-unsigned.ipa
+          name: ${{ env.PRODUCT_NAME }}-ios-unsigned
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
