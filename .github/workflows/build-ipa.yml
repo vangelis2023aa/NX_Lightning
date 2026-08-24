@@ -1,0 +1,41 @@
+name: Build NXLightning IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: List schemes (for safety)
+        run: |
+          xcodebuild -list -project src/MeloNX/MeloNX.xcodeproj || true
+
+      - name: Build unsigned archive
+        run: |
+          xcodebuild archive \
+            -project src/MeloNX/MeloNX.xcodeproj \
+            -scheme NXLightning \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/NXLightning.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Create IPA
+        run: |
+          mkdir -p Payload
+          cp -r $RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/*.app Payload/
+          zip -r NXLightning-unsigned.ipa Payload
+          mv NXLightning-unsigned.ipa $RUNNER_TEMP/
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NXLightning-IPA
+          path: ${{ runner.temp }}/NXLightning-unsigned.ipa
