@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,18 +23,52 @@ jobs:
             -scheme MeloNX \
             -sdk iphoneos \
             -configuration Debug \
-            -archivePath $RUNNER_TEMP/NXLightning.xcarchive \
+            -archivePath "$RUNNER_TEMP/NXLightning.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             SWIFT_OPTIMIZATION_LEVEL=-Onone
 
+      - name: Verify app identity
+        run: |
+          APP_PATH="$RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/NXLightning.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: NXLightning.app was not found."
+            echo "Applications found:"
+            find "$RUNNER_TEMP/NXLightning.xcarchive/Products/Applications" -maxdepth 1 -type d -print
+            exit 1
+          fi
+
+          echo "App found: $APP_PATH"
+
+          INFO_PLIST="$APP_PATH/Info.plist"
+
+          echo "Bundle identifier:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
+
+          echo "Bundle display name:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$INFO_PLIST" 2>/dev/null || true
+
+          echo "Bundle name:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$INFO_PLIST" 2>/dev/null || true
+
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST")
+
+          if [ "$BUNDLE_ID" != "com.vangelis.NXLightning" ]; then
+            echo "ERROR: Unexpected bundle identifier: $BUNDLE_ID"
+            exit 1
+          fi
+
       - name: Create IPA
         run: |
+          rm -rf Payload
           mkdir -p Payload
-          cp -r $RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/*.app Payload/
-          zip -r NXLightning-unsigned.ipa Payload
-          mv NXLightning-unsigned.ipa $RUNNER_TEMP/
+
+          cp -R "$RUNNER_TEMP/NXLightning.xcarchive/Products/Applications/NXLightning.app" Payload/
+
+          cd Payload
+          zip -r "$RUNNER_TEMP/NXLightning-unsigned.ipa" NXLightning.app
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
