@@ -63,6 +63,33 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos || true
 
+      - name: Verify Swift module name is pinned
+        # Runs BEFORE the ~20 min NativeAOT publish so a stale project file fails in seconds.
+        #
+        # Ryujinx.swift calls the bridging-header C API as MeloNX.load_keyset() etc. That
+        # `MeloNX.` prefix is the *Swift module name* qualifier, not a type. The module name
+        # comes from PRODUCT_MODULE_NAME, which silently defaults to PRODUCT_NAME -- so the
+        # NXLightning rename renames the module and every MeloNX.* call fails with
+        # "cannot find 'MeloNX' in scope". This surfaces that state as one clear error.
+        run: |
+          PBX=src/MeloNX/MeloNX.xcodeproj/project.pbxproj
+          echo "--- PRODUCT_MODULE_NAME in the checked-out project.pbxproj ---"
+          grep -n 'PRODUCT_MODULE_NAME' "$PBX" || true
+          # The app target has two configs (Debug + Release); both must pin the module name.
+          COUNT=$(grep -c "PRODUCT_MODULE_NAME = ${MODULE_NAME};" "$PBX" || true)
+          echo "pinned in $COUNT config(s)"
+          if [ "$COUNT" -lt 2 ]; then
+            echo "::error::project.pbxproj does not pin PRODUCT_MODULE_NAME = ${MODULE_NAME} in both Debug and Release of the ${MODULE_NAME} target (found ${COUNT}). Without it the module name follows PRODUCT_NAME (${PRODUCT_NAME}) and every MeloNX.* call in Ryujinx.swift fails with \"cannot find 'MeloNX' in scope\". Commit the pbxproj change and re-run. Note: it CANNOT be fixed by passing PRODUCT_MODULE_NAME to xcodebuild -- that applies to all targets and breaks the build with duplicate MeloNX.swiftmodule outputs."
+            exit 1
+          fi
+          echo "--- resolved settings for target ${MODULE_NAME} / $CONFIGURATION ---"
+          xcodebuild -project src/MeloNX/MeloNX.xcodeproj \
+            -target "$MODULE_NAME" \
+            -configuration "$CONFIGURATION" \
+            -showBuildSettings 2>/dev/null \
+            | grep -E ' (PRODUCT_NAME|PRODUCT_MODULE_NAME|SWIFT_OBJC_BRIDGING_HEADER|SWIFT_VERSION) = ' \
+            || echo "(could not read build settings)"
+
       - name: Setup .NET (from global.json)
         uses: actions/setup-dotnet@v4
         with:
@@ -93,32 +120,6 @@ jobs:
             exit 1
           fi
           file "$DYLIB"
-
-      - name: Verify Swift module name reached the runner
-        # Ryujinx.swift calls the bridging-header C API as MeloNX.load_keyset() etc. That
-        # `MeloNX.` prefix is the *Swift module name* qualifier, not a type. The module name
-        # comes from PRODUCT_MODULE_NAME, which silently defaults to PRODUCT_NAME -- so the
-        # NXLightning rename renames the module and every MeloNX.* call fails with
-        # "cannot find 'MeloNX' in scope". This step makes that state visible instead of
-        # surfacing as 50 confusing Swift errors.
-        run: |
-          PBX=src/MeloNX/MeloNX.xcodeproj/project.pbxproj
-          echo "--- PRODUCT_MODULE_NAME in the checked-out project.pbxproj ---"
-          grep -n 'PRODUCT_MODULE_NAME' "$PBX" || true
-          # The app target has two configs (Debug + Release); both must pin the module name.
-          COUNT=$(grep -c "PRODUCT_MODULE_NAME = ${MODULE_NAME};" "$PBX" || true)
-          echo "pinned in $COUNT config(s)"
-          if [ "$COUNT" -lt 2 ]; then
-            echo "::error::project.pbxproj does not pin PRODUCT_MODULE_NAME = ${MODULE_NAME} in both Debug and Release of the ${MODULE_NAME} target (found ${COUNT}). Without it the module name follows PRODUCT_NAME (${PRODUCT_NAME}) and every MeloNX.* call in Ryujinx.swift fails with \"cannot find 'MeloNX' in scope\". Commit the pbxproj change and re-run. Note: it CANNOT be fixed by passing PRODUCT_MODULE_NAME to xcodebuild -- that applies to all targets and breaks the build with duplicate MeloNX.swiftmodule outputs."
-            exit 1
-          fi
-          echo "--- resolved settings for target ${MODULE_NAME} / $CONFIGURATION ---"
-          xcodebuild -project src/MeloNX/MeloNX.xcodeproj \
-            -target "$MODULE_NAME" \
-            -configuration "$CONFIGURATION" \
-            -showBuildSettings 2>/dev/null \
-            | grep -E ' (PRODUCT_NAME|PRODUCT_MODULE_NAME|SWIFT_OBJC_BRIDGING_HEADER|SWIFT_VERSION) = ' \
-            || echo "(could not read build settings)"
 
       - name: Archive app (unsigned)
         run: |
