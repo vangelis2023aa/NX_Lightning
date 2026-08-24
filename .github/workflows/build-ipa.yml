@@ -22,7 +22,20 @@ name: Build iOS IPA (NXLightning)
 # files (no Git LFS), so a normal checkout is sufficient.
 
 on:
-  workflow_dispatch: {}   # run manually from the Actions tab
+  workflow_dispatch:
+    # Escape hatches for swift-frontend crashes in the SIL optimizer. The archive only runs the
+    # optimizer in Release, so if a compiler bug blocks the build you can dial it back here
+    # without editing the project. Leave both empty to use the project's own settings
+    # (SWIFT_COMPILATION_MODE = singlefile, SWIFT_OPTIMIZATION_LEVEL = -O).
+    inputs:
+      swift_compilation_mode:
+        description: 'Override SWIFT_COMPILATION_MODE (singlefile | wholemodule)'
+        required: false
+        default: ''
+      swift_optimization_level:
+        description: 'Override SWIFT_OPTIMIZATION_LEVEL (-O | -Osize | -Onone)'
+        required: false
+        default: ''
   push:
     branches: [ "**" ]
   pull_request: {}
@@ -136,7 +149,29 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+            DEVELOPMENT_TEAM="" \
+            ${{ inputs.swift_compilation_mode && format('SWIFT_COMPILATION_MODE={0}', inputs.swift_compilation_mode) || '' }} \
+            ${{ inputs.swift_optimization_level && format('SWIFT_OPTIMIZATION_LEVEL={0}', inputs.swift_optimization_level) || '' }}
+
+      - name: Show swift-frontend crash details
+        # swift-frontend crashes (SIGSEGV inside the SIL optimizer) print their useful part --
+        # "While running pass #N ... on SILFunction @..." plus stack frames 0-12 -- to stderr and
+        # to a .ips crash report. The archive step's own output is often truncated in the UI, so
+        # surface the report here: it names the exact pass and function that blew up.
+        if: failure()
+        run: |
+          shopt -s nullglob
+          reports=(~/Library/Logs/DiagnosticReports/swift-frontend*.ips)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "No swift-frontend crash report found (failure was probably not a compiler crash)."
+            exit 0
+          fi
+          for r in "${reports[@]}"; do
+            echo "::group::$r"
+            head -c 20000 "$r"
+            echo
+            echo "::endgroup::"
+          done
 
       - name: Verify bundle identity
         run: |

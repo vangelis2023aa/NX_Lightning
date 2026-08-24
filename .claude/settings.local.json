@@ -15,7 +15,8 @@
       "Bash(rg -n \"CacheSize|CodeCache|ReserveSize|new byte\\\\[|AllocateArray|0x[0-9A-Fa-f]{7,}\" src/Ryujinx.Cpu/Jit)",
       "Bash(python3 -c ' *)",
       "Bash(xcodebuild -version)",
-      "Bash(plutil -lint src/MeloNX/MeloNX.xcodeproj/project.pbxproj)"
+      "Bash(plutil -lint src/MeloNX/MeloNX.xcodeproj/project.pbxproj)",
+      "Bash(awk 'NR>=399 && NR<=760' Core/Models/Options/NativeModels.swift)"
     ]
   }
 }

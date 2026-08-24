@@ -222,16 +222,16 @@ class DOCConfigurationLC: NSObject {
         let appIdRef = SecTaskCopyValueForEntitlement(task, "application-identifier" as NSString, &error)
         releaseSecTask(task)
         
+        // appIdRef is a CFTypeRef?, i.e. ARC owns it (SecTaskCopyValueForEntitlement returns +1 and
+        // Swift's native return convention is +1 owned). The explicit CFRelease calls that used to
+        // be here were over-releases; getModifiedHostIdentifier above never did them either.
         if let appIdRef, var entString: String = appIdRef as? String {
-            CFRelease(appIdRef)
-            
             if let dotRange = entString.range(of: ".") {
                 entString = String(entString[dotRange.upperBound...])
             }
-            
+
             hook_setHostIdentifier(entString as NSString)
         } else {
-            if let appIdRef { CFRelease(appIdRef) }
             print("Error fetching entitlement: \(error?.localizedDescription ?? "Unknown error")")
             hook_setHostIdentifier(ignored)
         }

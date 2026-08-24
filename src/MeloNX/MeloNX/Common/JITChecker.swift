@@ -10,30 +10,11 @@ import Darwin
 import MachO
 import Metal
 
-@_silgen_name("vm_remap") func vm_remap(
-    _ target_task: mach_port_t,
-    _ target_address: UnsafeMutablePointer<mach_vm_address_t>,
-    _ size: mach_vm_size_t,
-    _ mask: mach_vm_offset_t,
-    _ flags: Int32,
-    _ src_task: mach_port_t,
-    _ src_address: mach_vm_address_t,
-    _ copy: boolean_t,
-    _ cur_protection: UnsafeMutablePointer<vm_prot_t>,
-    _ max_protection: UnsafeMutablePointer<vm_prot_t>,
-    _ inheritance: vm_inherit_t
-) -> kern_return_t
-
-@_silgen_name("vm_protect") func vm_protect(
-    _ target_task: mach_port_t,
-    _ address: mach_vm_address_t,
-    _ size: mach_vm_size_t,
-    _ set_maximum: boolean_t,
-    _ new_protection: vm_prot_t
-) -> kern_return_t
-
-@_silgen_name("sys_icache_invalidate")
-func sys_icache_invalidate(_ start: UnsafeMutableRawPointer, _ size: Int)
+// NOTE: do NOT re-declare vm_remap / vm_protect / sys_icache_invalidate with @_silgen_name.
+// All three are already imported from Darwin (mach/vm_map.h, libkern/OSCacheControl.h), so a
+// second @_silgen_name declaration binds a *different* Swift type to the *same* linker symbol --
+// two SILFunctions with one name in one SILModule, which the optimizer can trip over under -O.
+// Only csops needs the attribute: it has no public declaration.
 
 let CS_DEBUGGED = 0x10000000
 
@@ -82,7 +63,9 @@ func checkMemoryPermissions(at address: UnsafeRawPointer) -> Bool {
 }
 
 func testDualMappedExecution() -> Bool {
-    let pageSize = UInt(vm_page_size)
+    // vm_remap/vm_protect take vm_address_t / vm_size_t (both 64-bit on arm64), not the
+    // mach_vm_* aliases the old hand-rolled declarations used.
+    let pageSize: vm_size_t = vm_page_size
 
     let rawMmap = mmap(nil, Int(pageSize), PROT_READ | PROT_EXEC, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)
     guard let rxBase = rawMmap, rxBase != MAP_FAILED else {
@@ -91,15 +74,15 @@ func testDualMappedExecution() -> Bool {
 
     defer { munmap(rxBase, Int(pageSize)) }
 
-    let bufRX = mach_vm_address_t(UInt(bitPattern: rxBase))
-    var bufRW: mach_vm_address_t = 0
+    let bufRX = vm_address_t(UInt(bitPattern: rxBase))
+    var bufRW: vm_address_t = 0
     var curProt: vm_prot_t = 0
     var maxProt: vm_prot_t = 0
 
     let remapResult = vm_remap(
         mach_task_self_,
         &bufRW,
-        mach_vm_size_t(pageSize),
+        pageSize,
         0,
         VM_FLAGS_ANYWHERE,
         mach_task_self_,
@@ -118,7 +101,7 @@ func testDualMappedExecution() -> Bool {
     let protectResult = vm_protect(
         mach_task_self_,
         bufRW,
-        mach_vm_size_t(pageSize),
+        pageSize,
         0,
         VM_PROT_READ | VM_PROT_WRITE
     )
