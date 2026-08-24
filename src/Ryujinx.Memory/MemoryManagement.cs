@@ -1,5 +1,4 @@
 using System;
-using Ryujinx.Common;
 
 namespace Ryujinx.Memory
 {
@@ -7,33 +6,18 @@ namespace Ryujinx.Memory
     {
         public static nint Allocate(ulong size, bool forJit)
         {
-            nint ptr;
             if (OperatingSystem.IsWindows())
             {
-                ptr = MemoryManagementWindows.Allocate((nint)size);
+                return MemoryManagementWindows.Allocate((nint)size);
             }
             else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
             {
-                ptr = MemoryManagementUnix.Allocate(size, forJit);
+                return MemoryManagementUnix.Allocate(size, forJit);
             }
             else
             {
                 throw new PlatformNotSupportedException();
             }
-
-            if (MemoryProfiler.IsEnabled)
-            {
-                if (forJit)
-                {
-                    MemoryProfiler.AddJITMemory((long)size);
-                }
-                else
-                {
-                    MemoryProfiler.AddGuestMemory((long)size);
-                }
-            }
-
-            return ptr;
         }
 
         public static nint Reserve(ulong size, bool forJit, bool viewCompatible)
@@ -66,19 +50,6 @@ namespace Ryujinx.Memory
             {
                 throw new PlatformNotSupportedException();
             }
-
-            // Track memory commitment
-            if (MemoryProfiler.IsEnabled)
-            {
-                if (forJit)
-                {
-                    MemoryProfiler.AddJITMemory((long)size);
-                }
-                else
-                {
-                    MemoryProfiler.AddGuestMemory((long)size);
-                }
-            }
         }
 
         public static void Decommit(nint address, ulong size)
@@ -95,16 +66,24 @@ namespace Ryujinx.Memory
             {
                 throw new PlatformNotSupportedException();
             }
+        }
 
-            // Track memory decommitment
-            if (MemoryProfiler.IsEnabled)
+        /// <summary>
+        /// Best-effort release of the resident physical pages backing a range, keeping the range
+        /// reserved and mapped. Used to return the footprint of logically-freed regions (guest
+        /// memory that was unmapped, recycled JIT code pages) to the OS without tearing down the
+        /// reservation. The contents are discarded and the range faults back in on next access.
+        /// This is an optimization hint only: it never throws and is a no-op on platforms without
+        /// a supported implementation (currently only Darwin reclaims).
+        /// </summary>
+        public static void Reclaim(nint address, ulong size, bool reusable)
+        {
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
             {
-                // Note: We don't have forJit here, so we can't distinguish between JIT and guest memory
-                // This is a limitation of the current Decommit signature
-                // In practice, we might need to track this elsewhere or modify the signature
-                // For now, we'll assume it's guest memory (most common case)
-                MemoryProfiler.RemoveGuestMemory((long)size);
+                MemoryManagementUnix.Reclaim(address, size, reusable);
             }
+
+            // No-op on Windows and other platforms.
         }
 
         public static void MapView(nint sharedMemory, ulong srcOffset, nint address, ulong size, MemoryBlock owner)

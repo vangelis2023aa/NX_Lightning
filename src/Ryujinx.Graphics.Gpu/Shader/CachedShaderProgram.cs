@@ -1,4 +1,3 @@
-using Ryujinx.Common;
 using Ryujinx.Graphics.GAL;
 using System;
 
@@ -54,24 +53,6 @@ namespace Ryujinx.Graphics.Gpu.Shader
 
             SpecializationState.Prepare(shaders);
             Bindings = new CachedShaderBindings(shaders.Length == 1, shaders);
-
-            // Track shader memory allocation
-            if (MemoryProfiler.IsEnabled)
-            {
-                // Estimate shader memory usage based on binary size
-                long estimatedSize = 0;
-                foreach (var shader in shaders)
-                {
-                    // This is a rough estimate - in reality we'd need to query the actual binary size
-                    estimatedSize += 8192; // 8KB per shader stage as a placeholder
-                }
-                if (HostProgram != null)
-                {
-                    // Add estimated size for the program object itself
-                    estimatedSize += 4096; // 4KB for program object
-                }
-                MemoryProfiler.AddShaderMemory(estimatedSize);
-            }
         }
 
         public CachedShaderProgram(
@@ -93,24 +74,6 @@ namespace Ryujinx.Graphics.Gpu.Shader
             HostProgram.Dispose();
             VertexAsCompute?.HostProgram.Dispose();
             GeometryAsCompute?.HostProgram.Dispose();
-
-            // Track shader memory deallocation
-            if (MemoryProfiler.IsEnabled)
-            {
-                // Estimate shader memory usage based on binary size (same as in constructor)
-                long estimatedSize = 0;
-                foreach (var shader in Shaders)
-                {
-                    // This is a rough estimate - in reality we'd need to query the actual binary size
-                    estimatedSize += 8192; // 8KB per shader stage as a placeholder
-                }
-                if (HostProgram != null)
-                {
-                    // Add estimated size for the program object itself
-                    estimatedSize += 4096; // 4KB for program object
-                }
-                MemoryProfiler.RemoveShaderMemory(estimatedSize);
-            }
         }
     }
 }

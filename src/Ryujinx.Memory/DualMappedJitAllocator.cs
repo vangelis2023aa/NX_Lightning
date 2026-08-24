@@ -1,7 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
-using Ryujinx.Common;
 using Ryujinx.Common.Logging;
 using static Ryujinx.Memory.MemoryManagerUnixHelper;
 using System.Runtime.Versioning;
@@ -50,12 +49,6 @@ namespace Ryujinx.Memory
                 $"Allocating dual-mapped JIT memory of size {size} bytes, called by {callingMethod?.DeclaringType?.FullName}.{callingMethod?.Name} with {hasTXM}, {dualMappingEnabled}");
             Size = size;
             AllocateDualMapping();
-
-            // Track JIT memory allocation for dual-mapped JIT (iOS)
-            if (MemoryProfiler.IsEnabled)
-            {
-                MemoryProfiler.AddJITMemory((long)size);
-            }
         }
 
         nint? BreakGetJITMapping(nuint bytes)
@@ -122,12 +115,27 @@ namespace Ryujinx.Memory
                 munmap(RwPtr, Size);
                 RwPtr = IntPtr.Zero;
             }
+        }
 
-            // Track JIT memory deallocation for dual-mapped JIT (iOS)
-            if (MemoryProfiler.IsEnabled)
+        /// <summary>
+        /// Best-effort release of the resident physical pages backing a sub-range of the JIT cache,
+        /// used when recycling thread-local code slots. The RW and RX views alias the same physical
+        /// pages (vm_remap with copy=0), so advising the RW view covers both. Uses the lazy
+        /// MADV_FREE (not MADV_FREE_REUSABLE) because the pages are aliased by the executable view;
+        /// the range faults back in when the slot is next written with fresh code. Callers must
+        /// only pass ranges that are no longer executing. Page-aligned in/out is expected. Never
+        /// throws and is a no-op where reclaim is unsupported.
+        /// </summary>
+        /// <param name="offset">Offset into the cache of the range to reclaim</param>
+        /// <param name="size">Size of the range to reclaim</param>
+        public void Decommit(ulong offset, ulong size)
+        {
+            if (RwPtr == IntPtr.Zero || size == 0 || offset > Size || size > Size - offset)
             {
-                MemoryProfiler.RemoveJITMemory((long)Size);
+                return;
             }
+
+            MemoryManagement.Reclaim(RwPtr + (nint)offset, size, reusable: false);
         }
 
         private const int MAP_ANON = 0x1000;

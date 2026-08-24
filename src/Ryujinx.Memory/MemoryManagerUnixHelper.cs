@@ -57,6 +57,15 @@ namespace Ryujinx.Memory
         public const int MADV_DONTNEED = 4;
         public const int MADV_REMOVE = 9;
 
+        // Darwin (macOS/iOS) madvise advice values. These intentionally differ from Linux:
+        // on Darwin MADV_FREE == 5 and value 9 is MADV_CAN_REUSE (there is no MADV_REMOVE),
+        // which is why the MADV_REMOVE-based Decommit only works on Linux. MADV_FREE_REUSABLE
+        // immediately drops the range from the process phys_footprint (the figure iOS jetsam
+        // uses); MADV_FREE is the lazy variant that is always valid for anonymous/private pages.
+        public const int MADV_FREE_DARWIN = 5;
+        public const int MADV_FREE_REUSABLE_DARWIN = 7;
+        public const int MADV_FREE_REUSE_DARWIN = 8;
+
         [LibraryImport("libc", EntryPoint = "mmap", SetLastError = true)]
         private static partial nint Internal_mmap(nint address, ulong length, MmapProts prot, int flags, int fd, long offset);
 

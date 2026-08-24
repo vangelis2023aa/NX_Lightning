@@ -209,6 +209,17 @@ namespace Ryujinx.Cpu.LightningJit
 
         private void EnqueueForDeletion(ulong guestAddress, TranslatedFunction func)
         {
+            // On the iOS dual-mapped path the deferred-unmap queue is never drained: its only
+            // consumer, ClearJitCache, runs solely on the JitCache dispose branch below, which is
+            // skipped when _dualMappedNoWxCache is present. Enqueuing there would grow the queue
+            // unbounded for the life of the process (self-modifying / reloaded guest code hits this
+            // repeatedly). The function has already been removed from Functions and reset in the
+            // function table, so dropping the reference here lets the GC reclaim it immediately.
+            if (_dualMappedNoWxCache != null)
+            {
+                return;
+            }
+
             _oldFuncs.Enqueue(new(guestAddress, func));
         }
 

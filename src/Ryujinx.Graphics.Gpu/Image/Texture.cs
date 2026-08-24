@@ -1,4 +1,3 @@
-using Ryujinx.Common;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.GAL;
@@ -208,12 +207,6 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             ScaleFactor = scaleFactor;
             ScaleMode = scaleMode;
-
-            // Track GPU texture memory allocation
-            if (MemoryProfiler.IsEnabled)
-            {
-                MemoryProfiler.AddGPUTextureMemory((long)sizeInfo.TotalSize);
-            }
 
             InitializeData(true);
         }
@@ -1615,12 +1608,6 @@ namespace Ryujinx.Graphics.Gpu.Image
                 }
 
                 _physicalMemory.TextureCache.RemoveTextureFromCache(this);
-
-                // Track GPU texture memory deallocation
-                if (MemoryProfiler.IsEnabled)
-                {
-                    MemoryProfiler.RemoveGPUTextureMemory((long)Size);
-                }
             }
 
             Debug.Assert(newRefCount >= 0);

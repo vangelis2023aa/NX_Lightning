@@ -108,6 +108,42 @@ namespace Ryujinx.Memory
             }
         }
 
+        /// <summary>
+        /// Best-effort release of the resident physical pages backing a range, without unmapping
+        /// it or changing its protection. The virtual reservation (and any mapping/protection) is
+        /// preserved so the range can be re-used cheaply; the page contents are discarded and the
+        /// pages fault back in (zero-filled) on next access. Callers must already treat the range
+        /// as logically freed, since the contents are lost.
+        /// <para>
+        /// This is only implemented for Darwin (macOS/iOS) — the platforms this emulator ships
+        /// JIT/guest-memory reclaim for — and is a no-op elsewhere so existing behavior is
+        /// unchanged. It never throws: reclaiming is an optimization hint, not a correctness
+        /// operation. When <paramref name="reusable"/> is set it prefers MADV_FREE_REUSABLE, which
+        /// immediately drops the range from the process footprint; it falls back to the lazy
+        /// MADV_FREE when the range cannot be made reusable (e.g. it is aliased by another mapping,
+        /// as with dual-mapped JIT code).
+        /// </para>
+        /// </summary>
+        public static void Reclaim(nint address, ulong size, bool reusable)
+        {
+            if (size == 0)
+            {
+                return;
+            }
+
+            if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsIOS())
+            {
+                return;
+            }
+
+            if (reusable && madvise(address, size, MADV_FREE_REUSABLE_DARWIN) == 0)
+            {
+                return;
+            }
+
+            madvise(address, size, MADV_FREE_DARWIN);
+        }
+
         public static bool Reprotect(nint address, ulong size, MemoryPermission permission)
         {
             return mprotect(address, size, GetProtection(permission)) == 0;

@@ -1,4 +1,3 @@
-using Ryujinx.Common;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
@@ -131,20 +130,6 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             _descriptorSetManager = new DescriptorSetManager(_device, setDescriptors.Count);
-
-            // Track Vulkan pipeline layout and descriptor set layout memory
-            if (MemoryProfiler.IsEnabled)
-            {
-                // Estimated sizes: pipeline layout ~64 bytes, descriptor set layout ~32 bytes
-                MemoryProfiler.AddPipelineLayoutMemory(64);
-                if (DescriptorSetLayouts != null)
-                {
-                    for (int i = 0; i < DescriptorSetLayouts.Length; i++)
-                    {
-                        MemoryProfiler.AddDescriptorSetLayoutMemory(32);
-                    }
-                }
-            }
         }
 
         public void UpdateCommandBufferIndex(int commandBufferIndex)
@@ -372,19 +357,6 @@ namespace Ryujinx.Graphics.Vulkan
                     }
 
                     _manualDsCache[i].Clear();
-                }
-
-                // Track Vulkan pipeline layout and descriptor set layout memory deallocation
-                if (MemoryProfiler.IsEnabled)
-                {
-                    MemoryProfiler.RemovePipelineLayoutMemory(64);
-                    if (DescriptorSetLayouts != null)
-                    {
-                        for (int i = 0; i < DescriptorSetLayouts.Length; i++)
-                        {
-                            MemoryProfiler.RemoveDescriptorSetLayoutMemory(32);
-                        }
-                    }
                 }
 
                 _gd.Api.DestroyPipelineLayout(_device, PipelineLayout, null);

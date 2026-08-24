@@ -154,6 +154,50 @@ namespace Ryujinx.Memory
         }
 
         /// <summary>
+        /// Best-effort release of the resident physical pages backing a sub-range of this block,
+        /// keeping the range reserved and mapped. Used to return the footprint of logically-freed
+        /// regions (e.g. guest memory that was unmapped) to the OS without tearing down the
+        /// reservation, so the same block can be re-used cheaply. The contents are discarded and
+        /// the range faults back in on next access. This is an optimization hint and never throws.
+        /// </summary>
+        /// <param name="offset">Starting offset of the range to reclaim</param>
+        /// <param name="size">Size of the range to reclaim</param>
+        /// <param name="reusable">
+        /// When true, prefer an advice that immediately drops the range from the process footprint
+        /// (for memory that is not currently aliased); when false, use the gentler lazy advice
+        /// (for dual-mapped pages that share physical storage with another view).
+        /// </param>
+        public void Reclaim(ulong offset, ulong size, bool reusable = true)
+        {
+            nint ptr = _pointer;
+
+            if (ptr == nint.Zero || size == 0)
+            {
+                return;
+            }
+
+            ulong endOffset = offset + size;
+
+            if (endOffset > Size || endOffset < offset)
+            {
+                return;
+            }
+
+            // Align the range inward to whole pages so we never advise a partial page that could
+            // overlap a still-live neighbouring allocation. madvise only affects full pages anyway.
+            ulong pageMask = GetPageSize() - 1;
+            ulong alignedStart = (offset + pageMask) & ~pageMask;
+            ulong alignedEnd = endOffset & ~pageMask;
+
+            if (alignedEnd <= alignedStart)
+            {
+                return;
+            }
+
+            MemoryManagement.Reclaim(PtrAddr(ptr, alignedStart), alignedEnd - alignedStart, reusable);
+        }
+
+        /// <summary>
         /// Maps a view of memory from another memory block.
         /// </summary>
         /// <param name="srcBlock">Memory block from where the backing memory will be taken</param>

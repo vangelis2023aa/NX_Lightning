@@ -242,6 +242,16 @@ namespace Ryujinx.Cpu
 
                 block.Destroy();
             }
+            else
+            {
+                // The block stays alive and keeps its (large, block-aligned) reservation so the
+                // range can be re-allocated cheaply, but the just-freed sub-range is no longer
+                // referenced by the guest. Return its resident physical pages to the OS so they
+                // stop counting against the process footprint; the range faults back in if the
+                // same offset is later re-allocated and written. Best-effort and no-op where the
+                // backing does not support reclaim.
+                block.Memory.Reclaim(offset, size, reusable: true);
+            }
         }
 
         private void InsertBlock(T block)

@@ -199,10 +199,6 @@ namespace Ryujinx.Ava
                 }
             }
 
-            MemoryProfiler.TakeSnapshot();
-
-            MemoryProfiler.StartPeriodicSnapshots(300);
-
             if (CommandLineState.LaunchPathArg != null)
             {
                 MainWindow.DeferLoadApplication(CommandLineState.LaunchPathArg, CommandLineState.LaunchApplicationId, CommandLineState.StartFullscreenArg);

@@ -56,12 +56,6 @@ namespace Ryujinx.Graphics.Vulkan
             _pendingCopies = new Queue<PendingCopy>();
             _freeSize = BufferSize;
             _resourceAlignment = (int)gd.Capabilities.MinResourceAlignment;
-
-            // Track staging buffer memory allocation
-            if (MemoryProfiler.IsEnabled)
-            {
-                MemoryProfiler.AddStagingMemory(BufferSize);
-            }
         }
 
         public void PushData(CommandBufferPool cbp, CommandBufferScoped? cbs, Action endRenderPass, BufferHolder dst, int dstOffset, ReadOnlySpan<byte> data)
@@ -287,12 +281,6 @@ namespace Ryujinx.Graphics.Vulkan
             if (disposing)
             {
                 _gd.BufferManager.Delete(Handle);
-
-                // Track staging buffer memory deallocation
-                if (MemoryProfiler.IsEnabled)
-                {
-                    MemoryProfiler.RemoveStagingMemory(BufferSize);
-                }
 
                 while (_pendingCopies.TryDequeue(out PendingCopy pc))
                 {

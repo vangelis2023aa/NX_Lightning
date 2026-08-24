@@ -57,6 +57,11 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 _cacheAllocator.Free(offset, size);
             }
 
+            public void Decommit(int offset, int size)
+            {
+                _allocator.Decommit((ulong)offset, (ulong)size);
+            }
+
             public void SysIcacheInvalidate(int offset, int size)
             {
                 if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
@@ -141,13 +146,16 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             _localCache = new(_localCacheAlloc, LocalCacheSize);
         }
 
-        public static void InitMemoryCache() 
+        public static void InitMemoryCache()
         {
-            if (DualMappedJitAllocator.hasTXM && _sharedCacheAlloc != null && _localCacheAlloc != null)
-                return;
-
-            _sharedCacheAlloc = new(SharedCacheSize);
-            _localCacheAlloc = new(LocalCacheSize);
+            // Idempotent for BOTH the TXM and non-TXM paths. Re-allocating here would orphan the
+            // previous dual mappings (hundreds of MiB of RX+RW address space each) with no
+            // disposal. The original guard only short-circuited under TXM, so a second call on the
+            // non-TXM path (e.g. starting another emulation session, which builds a new Translator)
+            // leaked the prior shared/local allocators. The null-coalescing assignment preserves
+            // first-call behavior and is also safe against a partially-initialized state.
+            _sharedCacheAlloc ??= new(SharedCacheSize);
+            _localCacheAlloc ??= new(LocalCacheSize);
         }
 
         public unsafe nint Map(nint framePointer, ReadOnlySpan<byte> code, ulong guestAddress, ulong guestSize)
@@ -320,8 +328,13 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
                 int sizeAligned = BitUtils.AlignUp(entry.Size, pageSize);
 
+                // Return the recycled code pages' physical memory to the OS before handing the
+                // offset back to the allocator. Functions are page-aligned (see
+                // AddThreadLocalFunction), and this entry was excluded above if it is still on the
+                // call stack, so the range is exclusively this dead slot's and safe to reclaim; it
+                // faults back in when the offset is next reused and rewritten.
+                _localCache.Decommit(entry.Offset, sizeAligned);
                 _localCache.Free(entry.Offset, sizeAligned);
-                // _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
             }
 
             toDelete.Clear();
@@ -345,8 +358,10 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             {
                 int sizeAligned = BitUtils.AlignUp(entry.Size, pageSize);
 
+                // Thread is exiting: reclaim the physical backing of every one of its slots before
+                // returning the offsets to the allocator (see the note in ClearThreadLocalCache).
+                _localCache.Decommit(entry.Offset, sizeAligned);
                 _localCache.Free(entry.Offset, sizeAligned);
-                // _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
             }
 
             threadLocalCache.Clear();

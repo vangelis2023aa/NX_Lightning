@@ -1,4 +1,3 @@
-using Ryujinx.Common;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Synchronization;
 using Ryujinx.Memory.Range;
@@ -131,12 +130,6 @@ namespace Ryujinx.Graphics.Gpu.Memory
             BufferAccess access = BackingState.SwitchAccess(this);
 
             Handle = context.Renderer.CreateBuffer((int)size, access);
-
-            // Track GPU buffer memory allocation
-            if (MemoryProfiler.IsEnabled)
-            {
-                MemoryProfiler.AddGPUBufferMemory((long)size);
-            }
 
             _useGranular = size > GranularBufferThreshold;
 
@@ -1061,12 +1054,6 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public void DisposeData()
         {
             _modifiedRanges?.Clear();
-
-            // Track GPU buffer memory deallocation
-            if (MemoryProfiler.IsEnabled)
-            {
-                MemoryProfiler.RemoveGPUBufferMemory((long)Size);
-            }
 
             _context.Renderer.DeleteBuffer(Handle);
             _preFlush?.Dispose();
