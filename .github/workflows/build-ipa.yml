@@ -15,21 +15,18 @@ jobs:
         with:
           dotnet-version: '10.0.400'
 
-      - name: Show schemes
-        run: |
-          xcodebuild -list -project src/MeloNX/MeloNX.xcodeproj
-
-      - name: Build unsigned archive
+      - name: Build unsigned archive (Debug)
         run: |
           xcodebuild archive \
             -project src/MeloNX/MeloNX.xcodeproj \
             -scheme MeloNX \
             -sdk iphoneos \
-            -configuration Release \
+            -configuration Debug \
             -archivePath $RUNNER_TEMP/NXLightning.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            SWIFT_OPTIMIZATION_LEVEL=-Onone
 
       - name: Create IPA
         run: |
