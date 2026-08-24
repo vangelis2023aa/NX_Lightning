@@ -10,8 +10,8 @@ name: Build iOS IPA (NXLightning)
 #        src/Ryujinx.Library/bin/Release/net10.0/ios-arm64/native/Ryujinx.Library.dylib
 #      which is the static path the Xcode project links it from (it is NOT built by an
 #      Xcode Run Script phase), so it must exist before xcodebuild runs.
-#   2. Assert the Swift module name still resolves to MeloNX (see that step's comment --
-#      this is the one setting the NXLightning rename can silently break).
+#   2. Print the resolved Swift module/product settings (informational only -- the Swift
+#      sources no longer depend on the module being named MeloNX).
 #   3. xcodebuild archive the shared "MeloNX" scheme with code signing disabled.
 #   4. Package the produced NXLightning.app into an unsigned Payload/NXLightning.ipa
 #      (sideload/AltStore-style; sign later on-device or with your own cert).
@@ -35,8 +35,9 @@ env:
   POWERSHELL_TELEMETRY_OPTOUT: 1
   CONFIGURATION: Release
   SCHEME: MeloNX               # shared scheme in MeloNX.xcodeproj (unchanged by the rename)
-  MODULE_NAME: MeloNX          # Swift module name AND target name -- must stay MeloNX: Ryujinx.swift
-                               # qualifies the bridging-header C API as MeloNX.*
+  MODULE_NAME: MeloNX          # Xcode *target* name (unchanged by the rename). No longer needs to
+                               # match the Swift module name: Ryujinx.swift calls its @_silgen_name
+                               # globals unqualified now, so PRODUCT_MODULE_NAME is not load-bearing.
   PRODUCT_NAME: NXLightning     # PRODUCT_NAME -> NXLightning.app / NXLightning.ipa
   BUNDLE_ID: com.vangelis.NXLightning
 
@@ -63,25 +64,22 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos || true
 
-      - name: Verify Swift module name is pinned
-        # Runs BEFORE the ~20 min NativeAOT publish so a stale project file fails in seconds.
+      - name: Show Swift module / product settings
+        # Informational only -- never fails the build.
         #
-        # Ryujinx.swift calls the bridging-header C API as MeloNX.load_keyset() etc. That
-        # `MeloNX.` prefix is the *Swift module name* qualifier, not a type. The module name
-        # comes from PRODUCT_MODULE_NAME, which silently defaults to PRODUCT_NAME -- so the
-        # NXLightning rename renames the module and every MeloNX.* call fails with
-        # "cannot find 'MeloNX' in scope". This surfaces that state as one clear error.
+        # History: Ryujinx.swift used to call its own @_silgen_name globals as
+        # MeloNX.load_keyset() etc. That `MeloNX.` prefix was a *Swift module name* qualifier,
+        # not a type, and the module name comes from PRODUCT_MODULE_NAME, which silently
+        # defaults to PRODUCT_NAME -- so renaming the product to NXLightning renamed the module
+        # and every call failed with "cannot find 'MeloNX' in scope". Those globals are declared
+        # in that same file, so the prefix was redundant; it has been removed and the sources no
+        # longer care what the module is called. Kept as a diagnostic breadcrumb.
         run: |
           PBX=src/MeloNX/MeloNX.xcodeproj/project.pbxproj
-          echo "--- PRODUCT_MODULE_NAME in the checked-out project.pbxproj ---"
-          grep -n 'PRODUCT_MODULE_NAME' "$PBX" || true
-          # The app target has two configs (Debug + Release); both must pin the module name.
-          COUNT=$(grep -c "PRODUCT_MODULE_NAME = ${MODULE_NAME};" "$PBX" || true)
-          echo "pinned in $COUNT config(s)"
-          if [ "$COUNT" -lt 2 ]; then
-            echo "::error::project.pbxproj does not pin PRODUCT_MODULE_NAME = ${MODULE_NAME} in both Debug and Release of the ${MODULE_NAME} target (found ${COUNT}). Without it the module name follows PRODUCT_NAME (${PRODUCT_NAME}) and every MeloNX.* call in Ryujinx.swift fails with \"cannot find 'MeloNX' in scope\". Commit the pbxproj change and re-run. Note: it CANNOT be fixed by passing PRODUCT_MODULE_NAME to xcodebuild -- that applies to all targets and breaks the build with duplicate MeloNX.swiftmodule outputs."
-            exit 1
-          fi
+          echo "--- PRODUCT_MODULE_NAME in the checked-out project.pbxproj (may be absent; that is fine now) ---"
+          grep -n 'PRODUCT_MODULE_NAME' "$PBX" || echo "(not set -- module name follows PRODUCT_NAME, which is no longer a problem)"
+          echo "--- any remaining module-name qualifiers in live Swift code (should be none) ---"
+          grep -rn '\bMeloNX\.[A-Za-z_]' src/MeloNX/MeloNX --include='*.swift' || echo "(none)"
           echo "--- resolved settings for target ${MODULE_NAME} / $CONFIGURATION ---"
           xcodebuild -project src/MeloNX/MeloNX.xcodeproj \
             -target "$MODULE_NAME" \
@@ -127,8 +125,8 @@ jobs:
           # Do NOT pass PRODUCT_MODULE_NAME here. Command-line build settings apply to EVERY
           # target in the build, including the Melo-Controller and NavigationStackBackport
           # package targets -- they would all emit MeloNX.swiftmodule and the build fails with
-          # "Multiple commands produce .../MeloNX.swiftmodule". It must stay per-target in the
-          # pbxproj; the verify step above enforces that it is there.
+          # "Multiple commands produce .../MeloNX.swiftmodule". It is not needed at all any more:
+          # Ryujinx.swift no longer qualifies its @_silgen_name globals with the module name.
           xcodebuild archive \
             -project src/MeloNX/MeloNX.xcodeproj \
             -scheme "$SCHEME" \
