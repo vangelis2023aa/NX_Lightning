@@ -10,22 +10,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: List schemes (for safety)
-        run: |
-          xcodebuild -list -project src/MeloNX/MeloNX.xcodeproj || true
+      - name: Setup .NET 10.0.400
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.400'
 
-      - name: Build unsigned archive
+      - name: Build unsigned archive (Debug)
         run: |
           xcodebuild archive \
             -project src/MeloNX/MeloNX.xcodeproj \
-            -scheme NXLightning \
+            -scheme MeloNX \
             -sdk iphoneos \
-            -configuration Release \
+            -configuration Debug \
             -archivePath $RUNNER_TEMP/NXLightning.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+            SWIFT_OPTIMIZATION_LEVEL=-Onone
 
       - name: Create IPA
         run: |
