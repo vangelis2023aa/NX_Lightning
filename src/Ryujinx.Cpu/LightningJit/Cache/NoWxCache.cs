@@ -22,6 +22,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         {
             private readonly ReservedRegion _region;
             private readonly CacheMemoryAllocator _cacheAllocator;
+            private readonly ulong _size;
 
             public CacheMemoryAllocator Allocator => _cacheAllocator;
             public nint Pointer => _region.Block.Pointer;
@@ -30,6 +31,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             {
                 _region = new(allocator, size);
                 _cacheAllocator = new((int)size);
+                _size = size;
             }
 
             public int Allocate(int codeSize)
@@ -76,6 +78,29 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 {
                     throw new PlatformNotSupportedException();
                 }
+            }
+
+            /// <summary>
+            /// Best-effort release of the resident physical pages backing a recycled code slot,
+            /// returning its footprint to the OS while keeping the range reserved and mapped.
+            /// Unlike the dual-mapped cache, this one uses a single mapping reprotected between RW
+            /// and RX (there is no executable alias), so the stronger MADV_FREE_REUSABLE
+            /// (reusable: true) is safe here and drops phys_footprint immediately; the range faults
+            /// back in zero-filled when the offset is next reused and rewritten. The ReservedRegion
+            /// still considers the range committed (its high-water mark is unchanged), so a later
+            /// reuse below that mark does not re-commit and simply faults the page in. Callers must
+            /// only pass dead, page-aligned ranges (see ClearThreadLocalCache). Never throws.
+            /// </summary>
+            public void Reclaim(int offset, int size)
+            {
+                nint pointer = _region.Block.Pointer;
+
+                if (pointer == nint.Zero || offset < 0 || size <= 0 || (ulong)offset + (ulong)size > _size)
+                {
+                    return;
+                }
+
+                MemoryManagement.Reclaim(pointer + offset, (ulong)size, reusable: true);
             }
 
             private static int AlignCodeSize(int codeSize)
@@ -316,6 +341,12 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
                 _localCache.Free(entry.Offset, sizeAligned);
                 _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
+
+                // Return the recycled slot's physical pages to the OS. This entry was excluded above
+                // if it is still on the call stack, and functions are page-aligned (see
+                // AddThreadLocalFunction), so the range is this dead slot's alone; it is now RW and
+                // faults back in when the offset is next reused and rewritten.
+                _localCache.Reclaim(entry.Offset, sizeAligned);
             }
 
             toDelete.Clear();
@@ -341,6 +372,10 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
                 _localCache.Free(entry.Offset, sizeAligned);
                 _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
+
+                // Thread is exiting: reclaim the physical backing of every one of its (now dead)
+                // slots. See the note in ClearThreadLocalCache.
+                _localCache.Reclaim(entry.Offset, sizeAligned);
             }
 
             threadLocalCache.Clear();
