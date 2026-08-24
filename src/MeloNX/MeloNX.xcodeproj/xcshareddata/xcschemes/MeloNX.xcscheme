@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "4ED5D50A2F80DD02007DB057"
-               BuildableName = "NXLightning.app"
-               BlueprintName = "NXLightning"
-               ReferencedContainer = "container:NXLightning.xcodeproj">
+               BuildableName = "MeloNX.app"
+               BlueprintName = "MeloNX"
+               ReferencedContainer = "container:MeloNX.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -48,9 +48,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4ED5D50A2F80DD02007DB057"
-            BuildableName = "NXLightning.app"
-            BlueprintName = "NXLightning"
-            ReferencedContainer = "container:NXLightning.xcodeproj">
+            BuildableName = "MeloNX.app"
+            BlueprintName = "MeloNX"
+            ReferencedContainer = "container:MeloNX.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <AdditionalOptions>
@@ -75,9 +75,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "4ED5D50A2F80DD02007DB057"
-            BuildableName = "NXLightning.app"
-            BlueprintName = "NXlightning"
-            ReferencedContainer = "container:NXLightning.xcodeproj">
+            BuildableName = "MeloNX.app"
+            BlueprintName = "MeloNX"
+            ReferencedContainer = "container:MeloNX.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
