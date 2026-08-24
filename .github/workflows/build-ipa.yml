@@ -102,10 +102,17 @@ jobs:
         # "cannot find 'MeloNX' in scope". This step makes that state visible instead of
         # surfacing as 50 confusing Swift errors.
         run: |
+          PBX=src/MeloNX/MeloNX.xcodeproj/project.pbxproj
           echo "--- PRODUCT_MODULE_NAME in the checked-out project.pbxproj ---"
-          grep -n 'PRODUCT_MODULE_NAME' src/MeloNX/MeloNX.xcodeproj/project.pbxproj \
-            || echo "::warning::PRODUCT_MODULE_NAME is absent from project.pbxproj -- the checkout predates the module-name fix. The command-line override below compensates, but commit the pbxproj change so local Xcode builds match CI."
-          echo "--- resolved settings for target MeloNX / $CONFIGURATION ---"
+          grep -n 'PRODUCT_MODULE_NAME' "$PBX" || true
+          # The app target has two configs (Debug + Release); both must pin the module name.
+          COUNT=$(grep -c "PRODUCT_MODULE_NAME = ${MODULE_NAME};" "$PBX" || true)
+          echo "pinned in $COUNT config(s)"
+          if [ "$COUNT" -lt 2 ]; then
+            echo "::error::project.pbxproj does not pin PRODUCT_MODULE_NAME = ${MODULE_NAME} in both Debug and Release of the ${MODULE_NAME} target (found ${COUNT}). Without it the module name follows PRODUCT_NAME (${PRODUCT_NAME}) and every MeloNX.* call in Ryujinx.swift fails with \"cannot find 'MeloNX' in scope\". Commit the pbxproj change and re-run. Note: it CANNOT be fixed by passing PRODUCT_MODULE_NAME to xcodebuild -- that applies to all targets and breaks the build with duplicate MeloNX.swiftmodule outputs."
+            exit 1
+          fi
+          echo "--- resolved settings for target ${MODULE_NAME} / $CONFIGURATION ---"
           xcodebuild -project src/MeloNX/MeloNX.xcodeproj \
             -target "$MODULE_NAME" \
             -configuration "$CONFIGURATION" \
@@ -116,15 +123,17 @@ jobs:
       - name: Archive app (unsigned)
         run: |
           set -o pipefail
-          # PRODUCT_MODULE_NAME is pinned here as well as in the pbxproj: it is load-bearing
-          # for the MeloNX.* call sites and must never follow PRODUCT_NAME.
+          # Do NOT pass PRODUCT_MODULE_NAME here. Command-line build settings apply to EVERY
+          # target in the build, including the Melo-Controller and NavigationStackBackport
+          # package targets -- they would all emit MeloNX.swiftmodule and the build fails with
+          # "Multiple commands produce .../MeloNX.swiftmodule". It must stay per-target in the
+          # pbxproj; the verify step above enforces that it is there.
           xcodebuild archive \
             -project src/MeloNX/MeloNX.xcodeproj \
             -scheme "$SCHEME" \
             -configuration "$CONFIGURATION" \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/$PRODUCT_NAME.xcarchive" \
-            PRODUCT_MODULE_NAME="$MODULE_NAME" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \

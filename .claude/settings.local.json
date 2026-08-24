@@ -13,7 +13,9 @@
       "Bash(/usr/bin/grep -i \"cache\\\\|cpuMemory\\\\|physicalMemory\\\\|GetTotalPhysicalMemory\\\\|TextureCache\")",
       "Bash(/usr/bin/grep -rn \"TotalPhysicalMemory\\\\|cpuMemorySize\\\\|TextureCache.Initialize\\\\|\\\\.Initialize\\(cpuMemory\\\\|MaximumGpuMemory\" /Users/vangelis/Downloads/melonx/src/)",
       "Bash(rg -n \"CacheSize|CodeCache|ReserveSize|new byte\\\\[|AllocateArray|0x[0-9A-Fa-f]{7,}\" src/Ryujinx.Cpu/Jit)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(xcodebuild -version)",
+      "Bash(plutil -lint src/MeloNX/MeloNX.xcodeproj/project.pbxproj)"
     ]
   }
 }
