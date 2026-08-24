@@ -16,6 +16,10 @@ x64/
 build/
 [Bb]in/
 [Oo]bj/
+AppDir/
+publish_appimage/
+publish_ava/
+publish_tmp_ava/
 
 # Enable "build/" folder in the NuGet Packages folder since NuGet packages use it for MSBuild targets
 !packages/*/build/
@@ -96,6 +100,7 @@ DocProject/Help/html
 
 # Click-Once directory
 publish/
+RyubingMaintainerTools/
 
 # Publish Web Output
 *.Publish.xml
@@ -173,3 +178,12 @@ PublishProfiles/
 
 # Glade backup files
 *.glade~
+
+# Ignore MacOS Attribute Files
+._*
+
+# Ignore distribution build files
+distribution/macos/temp/
+distribution/macos/output/
+
+src/MeloNX/MeloNX.xcodeproj/project.xcworkspace/xcuserdata/*

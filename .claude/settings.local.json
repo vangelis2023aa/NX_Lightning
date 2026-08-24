@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk ls *)",
+      "Bash(rtk git *)",
+      "Bash(rtk rg *)",
+      "Bash(rtk grep *)",
+      "Bash(xargs sed -n '1,60p')",
+      "Bash(rtk proxy *)",
+      "Bash(rtk find *)",
+      "Bash(rtk read *)",
+      "Bash(rg -n \"CacheSize|CodeCache|_cacheSize|ReserveSize|0x[0-9A-Fa-f]{7,}\" src/Ryujinx.Cpu/LightningJit)",
+      "Bash(/usr/bin/grep -i \"cache\\\\|cpuMemory\\\\|physicalMemory\\\\|GetTotalPhysicalMemory\\\\|TextureCache\")",
+      "Bash(/usr/bin/grep -rn \"TotalPhysicalMemory\\\\|cpuMemorySize\\\\|TextureCache.Initialize\\\\|\\\\.Initialize\\(cpuMemory\\\\|MaximumGpuMemory\" /Users/vangelis/Downloads/melonx/src/)",
+      "Bash(rg -n \"CacheSize|CodeCache|ReserveSize|new byte\\\\[|AllocateArray|0x[0-9A-Fa-f]{7,}\" src/Ryujinx.Cpu/Jit)",
+      "Bash(python3 -c ' *)"
+    ]
+  }
+}
