@@ -43,7 +43,7 @@ struct RumbleData {
 
         lowFrequency = Self.readFloat(bytes, offset: 0)
         highFrequency = Self.readFloat(bytes, offset: 4)
-        durationMs = bytes.load(fromByteOffset: 8, as: UInt32.self)
+        durationMs = bytes.loadUnaligned(fromByteOffset: 8, as: UInt32.self)
 
         if byteCount >= Self.highDefinitionByteCount {
             left = VibrationValue(
@@ -71,6 +71,8 @@ struct RumbleData {
     }
 
     private static func readFloat(_ bytes: UnsafeRawPointer, offset: Int) -> Float {
-        bytes.load(fromByteOffset: offset, as: Float.self)
+        // The `init?(data:)` path hands us a Data-backed pointer, which is only
+        // guaranteed 1-byte aligned, so avoid the aligned `load`.
+        bytes.loadUnaligned(fromByteOffset: offset, as: Float.self)
     }
 }

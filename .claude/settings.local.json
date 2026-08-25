@@ -17,7 +17,10 @@
       "Bash(xcodebuild -version)",
       "Bash(plutil -lint src/MeloNX/MeloNX.xcodeproj/project.pbxproj)",
       "Bash(awk 'NR>=399 && NR<=760' Core/Models/Options/NativeModels.swift)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(plutil -p Info.plist)",
+      "Bash(xcodebuild -list -project MeloNX.xcodeproj)",
+      "Bash(xcodebuild -showsdks)"
     ]
   }
 }
