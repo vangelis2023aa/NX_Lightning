@@ -223,15 +223,12 @@ class DOCConfigurationLC: NSObject {
         releaseSecTask(task)
         
         if let appIdRef, var entString: String = appIdRef as? String {
-            CFRelease(appIdRef)
-            
             if let dotRange = entString.range(of: ".") {
                 entString = String(entString[dotRange.upperBound...])
             }
-            
+
             hook_setHostIdentifier(entString as NSString)
         } else {
-            if let appIdRef { CFRelease(appIdRef) }
             print("Error fetching entitlement: \(error?.localizedDescription ?? "Unknown error")")
             hook_setHostIdentifier(ignored)
         }

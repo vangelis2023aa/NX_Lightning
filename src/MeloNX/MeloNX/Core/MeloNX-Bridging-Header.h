@@ -3,8 +3,8 @@
 //
 
 
-#ifndef MeloNX-BridgingHeader_h
-#define MeloNX-BridgingHeader_h
+#ifndef MELONX_BRIDGING_HEADER_H
+#define MELONX_BRIDGING_HEADER_H
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>

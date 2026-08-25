@@ -25,12 +25,22 @@ class StatisticsHandler: ObservableObject {
     func registerPush() {
         CallbackManager.register(name: "push_statistics") { data in
             guard let ptr = data.ptr, data.len >= 33 else { return }
-            
-            let fps = ptr.load(fromByteOffset: 0, as: Double.self)
-            let frameTime = ptr.load(fromByteOffset: 8, as: Double.self)
-            let started = ptr.load(fromByteOffset: 16, as: UInt8.self) != 0
-            let fifo = ptr.load(fromByteOffset: 17, as: Double.self)
-            
+
+            // The payload is packed, so FIFO sits at offset 17 and is never
+            // 8-byte aligned. `load` requires alignment, so copy the bytes out
+            // instead of reinterpreting them in place.
+            var fps = 0.0
+            var frameTime = 0.0
+            var startedByte: UInt8 = 0
+            var fifo = 0.0
+
+            memcpy(&fps, ptr, MemoryLayout<Double>.size)
+            memcpy(&frameTime, ptr + 8, MemoryLayout<Double>.size)
+            memcpy(&startedByte, ptr + 16, MemoryLayout<UInt8>.size)
+            memcpy(&fifo, ptr + 17, MemoryLayout<Double>.size)
+
+            let started = startedByte != 0
+
             Task {
                 await MainActor.run {
                     self.fps       = fps

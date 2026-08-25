@@ -39,7 +39,7 @@
 
 /* Begin PBXFileReference section */
 		4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = Ryujinx.Library.dylib; path = "../Ryujinx.Library/bin/Release/net10.0/ios-arm64/native/Ryujinx.Library.dylib"; sourceTree = "<group>"; };
-		4ED5D50B2F80DD02007DB057 /* MeloNX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MeloNX.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4ED5D50B2F80DD02007DB057 /* NXLightning.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NXLightning.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -134,7 +134,7 @@
 		4ED5D50C2F80DD02007DB057 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				4ED5D50B2F80DD02007DB057 /* MeloNX.app */,
+				4ED5D50B2F80DD02007DB057 /* NXLightning.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -184,7 +184,7 @@
 				4EA6523A2FBD941E00D6FB52 /* NavigationStackBackport */,
 			);
 			productName = MeloNX;
-			productReference = 4ED5D50B2F80DD02007DB057 /* MeloNX.app */;
+			productReference = 4ED5D50B2F80DD02007DB057 /* NXLightning.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -376,7 +376,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
-				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_COMPILATION_MODE = singlefile;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -420,8 +420,11 @@
 					"$(PROJECT_DIR)/MeloNX/Dependencies",
 				);
 				MARKETING_VERSION = 2.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloNX;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				INFOPLIST_KEY_CFBundleDisplayName = NXLightning;
+				INFOPLIST_KEY_CFBundleName = NXLightning;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vangelis.NXLightning;
+				PRODUCT_MODULE_NAME = MeloNX;
+				PRODUCT_NAME = NXLightning;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -472,8 +475,11 @@
 					"$(PROJECT_DIR)/MeloNX/Dependencies",
 				);
 				MARKETING_VERSION = 2.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloNX;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				INFOPLIST_KEY_CFBundleDisplayName = NXLightning;
+				INFOPLIST_KEY_CFBundleName = NXLightning;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vangelis.NXLightning;
+				PRODUCT_MODULE_NAME = MeloNX;
+				PRODUCT_NAME = NXLightning;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

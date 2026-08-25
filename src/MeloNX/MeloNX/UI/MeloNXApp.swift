@@ -87,9 +87,8 @@ struct MeloNXApp: App {
                 .onAppear() {
                     UIDevice.current.beginGeneratingDeviceOrientationNotifications()
                     
-                    let versionNumber = lastAppversion.withUnsafeBytes { $0.load(as: Float.self) }
+                    let versionNumber = decodeFloatFromData(lastAppversion)
 
-                    
                     if versionNumber < Float(Bundle.main.versionNumber) ?? .zero {
                         lastAppversion = encodeFloatToData(Float(Bundle.main.versionNumber) ?? .zero)
                          hasSetupFinished = false
@@ -109,5 +108,24 @@ struct MeloNXApp: App {
     func encodeFloatToData(_ value: Float) -> Data {
         var mutableValue = value
         return Data(bytes: &mutableValue, count: MemoryLayout<Float>.size)
+    }
+
+    /// Reads back a value written by `encodeFloatToData`.
+    ///
+    /// On a fresh install the stored Data is empty, and loading a Float from zero
+    /// bytes trips `UnsafeRawBufferPointer.load`'s bounds check under -Onone. A
+    /// missing or short value reads as 0, which is older than any real version, so
+    /// setup runs again. The bytes are reassembled by hand so this needs no
+    /// alignment guarantee and no unsafe pointer access.
+    func decodeFloatFromData(_ data: Data) -> Float {
+        guard data.count >= MemoryLayout<Float>.size else { return .zero }
+
+        let start = data.startIndex
+        let bits = UInt32(data[start])
+            | UInt32(data[start + 1]) << 8
+            | UInt32(data[start + 2]) << 16
+            | UInt32(data[start + 3]) << 24
+
+        return Float(bitPattern: bits)
     }
 }

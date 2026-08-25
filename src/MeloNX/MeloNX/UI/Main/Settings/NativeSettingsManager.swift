@@ -63,13 +63,13 @@ class NativeSettingsManager: ObservableObject {
         objectWillChange.send()
     }
     
-    subscript<T: Any>(dynamicMember member: String) -> (T) -> Setting<T> {
+    subscript<T>(dynamicMember member: String) -> (T) -> Setting<T> {
         return { [weak self] input in
             Setting<T>.getOrCreateSetting(named: member, default: input, self: self)
         }
     }
     
-    subscript<T: Any>(dynamicMember member: String) -> Setting<T> {
+    subscript<T>(dynamicMember member: String) -> Setting<T> {
         if T.self == Bool.self {
             return Setting<T>.getOrCreateSetting(named: member, default: false as? T, self: self)
         } else if T.self == Double.self {
@@ -79,7 +79,7 @@ class NativeSettingsManager: ObservableObject {
         return Setting<T>.getOrCreateSetting(named: member, default: nil, self: self)
     }
     
-    func setting<T: Any>(forKey key: String, default defaultValue: T) -> Setting<T> {
+    func setting<T>(forKey key: String, default defaultValue: T) -> Setting<T> {
         Setting<T>.getOrCreateSetting(named: key, default: defaultValue, self: self)
     }
 }
@@ -88,7 +88,7 @@ protocol AnySettingProtocol {
     var name: String { get }
 }
 
-class Setting<T: Any>: Hashable, AnySettingProtocol {
+class Setting<T>: Hashable, AnySettingProtocol {
     static func == (lhs: Setting<T>, rhs: Setting<T>) -> Bool {
         lhs.name == rhs.name && lhs.parent === rhs.parent
     }
