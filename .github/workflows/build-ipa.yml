@@ -151,7 +151,23 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             ${{ inputs.swift_compilation_mode && format('SWIFT_COMPILATION_MODE={0}', inputs.swift_compilation_mode) || '' }} \
-            ${{ inputs.swift_optimization_level && format('SWIFT_OPTIMIZATION_LEVEL={0}', inputs.swift_optimization_level) || '' }}
+            ${{ inputs.swift_optimization_level && format('SWIFT_OPTIMIZATION_LEVEL={0}', inputs.swift_optimization_level) || '' }} \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: Show archive errors
+        # The archive step's own console output is interleaved and often truncated in the Actions UI,
+        # which is how a one-line "error: ..." goes missing. Pull the real diagnostics out of the
+        # teed log so the next failure is legible without guessing.
+        if: failure()
+        run: |
+          LOG="$RUNNER_TEMP/xcodebuild.log"
+          [ -f "$LOG" ] || { echo "No xcodebuild log was produced."; exit 0; }
+          echo "::group::error / warning lines"
+          grep -nE '(^|[[:space:]])(error|fatal error|note:|warning: .*deprecat)' "$LOG" | head -100 || echo "(no error: lines -- likely a compiler crash, see next step)"
+          echo "::endgroup::"
+          echo "::group::last 200 lines of xcodebuild output"
+          tail -200 "$LOG"
+          echo "::endgroup::"
 
       - name: Show swift-frontend crash details
         # swift-frontend crashes (SIGSEGV inside the SIL optimizer) print their useful part --
