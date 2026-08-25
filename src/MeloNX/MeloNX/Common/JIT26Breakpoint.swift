@@ -7,10 +7,7 @@
 
 import Foundation
 
-// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` makes every unannotated decl in this module
-// @MainActor, including this one -- and a @MainActor function converted to @convention(c)
-// is both wrong for a signal handler and makes SILGen emit an isolation thunk. Opt out.
-nonisolated func handler(sig: Int32, info: UnsafeMutablePointer<siginfo_t>?, context: UnsafeMutableRawPointer?) {
+func handler(sig: Int32, info: UnsafeMutablePointer<siginfo_t>?, context: UnsafeMutableRawPointer?) {
     guard let context = context else { return }
     let uc = context.bindMemory(to: ucontext_t.self, capacity: 1)
     uc.pointee.uc_mcontext.pointee.__ss.__pc += 4

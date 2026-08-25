@@ -28,11 +28,8 @@ func SecTaskCreateFromSelf(
     _ allocator: CFAllocator?
 ) -> SecTaskRef?
 
-// NOTE: do NOT re-declare CFRelease with @_silgen_name. Unlike the SecTask* symbols above it is
-// already imported from CoreFoundation, so a second declaration binds a different Swift type to
-// the same linker symbol -- two SILFunctions with one name in one SILModule, which the optimizer
-// can trip over under -O. (Calling the imported one is not an option either: Swift marks it
-// unavailable, "Core Foundation objects are automatically memory managed".) Use Unmanaged instead.
+@_silgen_name("CFRelease")
+func CFRelease(_ cf: CFTypeRef?)
 
 @_silgen_name("SecTaskCopyValuesForEntitlements")
 func SecTaskCopyValuesForEntitlements(
@@ -41,10 +38,9 @@ func SecTaskCopyValuesForEntitlements(
     _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
 ) -> CFDictionary?
 
-// SecTaskRef is an OpaquePointer, so ARC does not own it: SecTaskCreateFromSelf hands back a +1
-// reference that has to be released by hand. Unmanaged.release() is the CFRelease equivalent.
 func releaseSecTask(_ task: SecTaskRef) {
-    Unmanaged<AnyObject>.fromOpaque(UnsafeRawPointer(task)).release()
+    let cf = unsafeBitCast(task, to: CFTypeRef.self)
+    CFRelease(cf)
 }
 
 func checkAppEntitlements(_ ents: [String]) -> [String: Any] {

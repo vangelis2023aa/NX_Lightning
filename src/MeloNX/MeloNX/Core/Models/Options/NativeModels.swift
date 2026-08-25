@@ -27,7 +27,7 @@ enum VSyncMode: Int32, Codable, CaseIterable, Identifiable {
 extension ControllerType: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [ControllerType] = [
+    public static var allCases: [ControllerType] = [
         .proController, .handheld, .joyconPair, .joyconLeft, .joyconRight, .pokeball,
     ]
     
@@ -49,7 +49,7 @@ extension ControllerType: CaseIterable, Identifiable {
 extension AspectRatio: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [AspectRatio] = [
+    public static var allCases: [AspectRatio] = [
         .fixed16x9, .fixed4x3, .fixed21x9, .fixed32x9, .fixed16x10, .stretched,
     ]
     
@@ -69,7 +69,7 @@ extension AspectRatio: CaseIterable, Identifiable {
 extension SystemLanguage: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [SystemLanguage] = [
+    public static var allCases: [SystemLanguage] = [
         .japanese, .americanEnglish, .french, .german, .italian, .spanish,
         .chinese, .korean, .dutch, .portuguese, .russian, .taiwanese,
         .britishEnglish, .canadianFrench, .latinAmericanSpanish,
@@ -106,7 +106,7 @@ extension SystemLanguage: CaseIterable, Identifiable {
 extension HideCursorMode: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [HideCursorMode] = [
+    public static var allCases: [HideCursorMode] = [
         .never, .onIdle, .always,
     ]
     
@@ -123,7 +123,7 @@ extension HideCursorMode: CaseIterable, Identifiable {
 extension NativeRegionCode: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [NativeRegionCode] = [
+    public static var allCases: [NativeRegionCode] = [
         .japan, .USA, .europe, .australia, .china, .korea, .taiwan,
     ]
     
@@ -172,7 +172,7 @@ extension NativeRegionCode: CaseIterable, Identifiable {
 extension MemoryManagerMode: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
 
-    nonisolated public static let allCases: [MemoryManagerMode] = [
+    public static var allCases: [MemoryManagerMode] = [
         .softwarePageTable, .hostMapped, .hostMappedUnsafe,
     ]
 
@@ -189,7 +189,7 @@ extension MemoryManagerMode: CaseIterable, Identifiable {
 extension GraphicsDebugLevel: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
 
-    nonisolated public static let allCases: [GraphicsDebugLevel] = [
+    public static var allCases: [GraphicsDebugLevel] = [
         .none, .error, .slowdowns, .all,
     ]
 
@@ -207,7 +207,7 @@ extension GraphicsDebugLevel: CaseIterable, Identifiable {
 extension BackendThreading: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [BackendThreading] = [
+    public static var allCases: [BackendThreading] = [
         .auto, .off, .on,
     ]
     
@@ -224,7 +224,7 @@ extension BackendThreading: CaseIterable, Identifiable {
 extension AntiAliasing: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
 
-    nonisolated public static let allCases: [AntiAliasing] = [
+    public static var allCases: [AntiAliasing] = [
         .none, .fxaa, .smaaLow, .smaaMedium, .smaaHigh, .smaaUltra,
     ]
 
@@ -244,7 +244,7 @@ extension AntiAliasing: CaseIterable, Identifiable {
 extension ScalingFilter: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [ScalingFilter] = [
+    public static var allCases: [ScalingFilter] = [
         .bilinear, .nearest, .fsr, .area
     ]
     
@@ -262,7 +262,7 @@ extension ScalingFilter: CaseIterable, Identifiable {
 extension GraphicsBackend: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
-    nonisolated public static let allCases: [GraphicsBackend] = [
+    public static var allCases: [GraphicsBackend] = [
         .vulkan, .openGl,
     ]
     
@@ -399,7 +399,7 @@ extension KeyboardConfigNative: Codable {
 extension Key: CaseIterable, Identifiable, Codable {
     public var id: UInt32 { self.rawValue }
     
-    nonisolated public static let allCases: [Key] = [
+    public static var allCases: [Key] = [
         // Key_Unknown,
         Key_ShiftLeft,
         Key_ShiftRight,

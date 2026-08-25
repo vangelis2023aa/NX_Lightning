@@ -92,7 +92,9 @@ jobs:
           echo "--- PRODUCT_MODULE_NAME in the checked-out project.pbxproj (may be absent; that is fine now) ---"
           grep -n 'PRODUCT_MODULE_NAME' "$PBX" || echo "(not set -- module name follows PRODUCT_NAME, which is no longer a problem)"
           echo "--- any remaining module-name qualifiers in live Swift code (should be none) ---"
-          grep -rn '\bMeloNX\.[A-Za-z_]' src/MeloNX/MeloNX --include='*.swift' || echo "(none)"
+          # Anchored so it does not match MeloNX inside reverse-DNS string literals
+          # (e.g. "com.stossy11.MeloNX.rumble"), which are not module qualifiers.
+          grep -rnE '(^|[^.[:alnum:]_])MeloNX\.[A-Za-z_]' src/MeloNX/MeloNX --include='*.swift' || echo "(none)"
           echo "--- resolved settings for target ${MODULE_NAME} / $CONFIGURATION ---"
           xcodebuild -project src/MeloNX/MeloNX.xcodeproj \
             -target "$MODULE_NAME" \
