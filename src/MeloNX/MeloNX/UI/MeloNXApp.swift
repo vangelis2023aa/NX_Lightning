@@ -87,13 +87,9 @@ struct MeloNXApp: App {
                 .onAppear() {
                     UIDevice.current.beginGeneratingDeviceOrientationNotifications()
                     
-                    // On a fresh install lastAppversion is an empty Data, so guard the byte
-                    // count before loading. A missing or short value reads as 0, which is
-                    // older than any real version, so setup runs again.
-                    let versionNumber: Float = lastAppversion.count >= MemoryLayout<Float>.size
-                        ? lastAppversion.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }
-                        : .zero
+                    let versionNumber = lastAppversion.withUnsafeBytes { $0.load(as: Float.self) }
 
+                    
                     if versionNumber < Float(Bundle.main.versionNumber) ?? .zero {
                         lastAppversion = encodeFloatToData(Float(Bundle.main.versionNumber) ?? .zero)
                          hasSetupFinished = false

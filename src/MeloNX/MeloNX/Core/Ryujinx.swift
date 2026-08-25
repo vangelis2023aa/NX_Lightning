@@ -15,87 +15,87 @@ final class Ryujinx {
     static var emulationView: MTKView?
     
     static func initialize() {
-        nx_initialize()
+        MeloNX.initialize()
     }
     
     static func stopEmulation() {
-        stop_emulation()
+        MeloNX.stop_emulation()
     }
     
     static func mainRyu(_ native: Options) -> Int {
-        return Int(main_ryujinx_sdl(native.toNative()))
+        return Int(MeloNX.main_ryujinx_sdl(native.toNative()))
     }
     
     static func setNativeWindow(_ layerPtr: UnsafeMutableRawPointer) {
-        set_native_window(layerPtr)
+        MeloNX.set_native_window(layerPtr)
     }
     
     static func getGameInfo(arg0: Int32, arg1: NSString, path: URL) -> GameInfo {
         let arg1Ptr = UnsafeMutablePointer<CChar>(mutating: arg1.utf8String)
-        return GameInfo(get_game_info(arg0, arg1Ptr), url: path)
+        return GameInfo(MeloNX.get_game_info(arg0, arg1Ptr), url: path)
     }
     
     static func attachGamepad(_ id: UnsafeMutableRawPointer?, _ name: String, _ index: Int, _ type: ControllerType) {
-        _ = name.withCString { attach_gamepad($0, id, Int32(index), type)  }
+        _ = name.withCString { MeloNX.attach_gamepad($0, id, Int32(index), type)  }
     }
     
     static func detachGamepad(_ id: UnsafeMutableRawPointer?) {
-        detach_gamepad(id)
+        MeloNX.detach_gamepad(id)
     }
 
     static func setGamepadButtonState(_ id: UnsafeMutableRawPointer?, buttonId: Int, pressed: Bool) {
-        set_gamepad_button_state(id, Int32(buttonId), pressed ? 1 : 0)
+        MeloNX.set_gamepad_button_state(id, Int32(buttonId), pressed ? 1 : 0)
     }
 
     static func setGamepadStickAxis(_ id: UnsafeMutableRawPointer?, stickId: Int, x: Float, y: Float) {
-        set_gamepad_stick_axis(id, Int32(stickId), x, y)
+        MeloNX.set_gamepad_stick_axis(id, Int32(stickId), x, y)
     }
     
     static func setGamepadMotion(_ id: UnsafeMutableRawPointer?, motionType: Int, axis: SIMD3<Float>) {
-        set_gamepad_motion_axis(id, Int32(motionType), axis.x, axis.y, axis.z)
+        MeloNX.set_gamepad_motion_axis(id, Int32(motionType), axis.x, axis.y, axis.z)
     }
 
     static func initDualMapping() -> Bool {
-        init_dualmapping()
+        MeloNX.init_dualmapping()
     }
     
     static func reloadKeySet() {
-        load_keyset()
+        MeloNX.load_keyset()
     }
     
     static var installedFirmwareVersion: String {
-        let firmware = installed_firmware_version()
-        defer { free_firmware_version(firmware) }
+        let firmware = MeloNX.installed_firmware_version()
+        defer { MeloNX.free_firmware_version(firmware) }
         return String(cString: firmware)
     }
     
     static func installFirmware(at path: String) throws {
         let error = path.withCString {
-            install_firmware($0)
+            MeloNX.install_firmware($0)
         }
         
         guard let error else { return }
         
         let string = String(cString: error)
-        defer { free_firmware_version(error) }
+        defer { MeloNX.free_firmware_version(error) }
 
         throw FirmwareInstallationError.failedInstall(string)
     }
     
     static func touchBegan(_ point: CGPoint, index: Int) {
-        touch_began(Float(point.x), Float(point.y), Int32(index))
+        MeloNX.touch_began(Float(point.x), Float(point.y), Int32(index))
     }
     
     static func touchEnded(index: Int) {
-        touch_ended(Int32(index))
+        MeloNX.touch_ended(Int32(index))
     }
     
     static func touchMoved(_ point: CGPoint, index: Int) {
-        touch_moved(Float(point.x), Float(point.y), Int32(index))
+        MeloNX.touch_moved(Float(point.x), Float(point.y), Int32(index))
     }
     
     static func setViewSize(_ rect: CGRect) {
-        set_view_size(Int32(rect.width), Int32(rect.height))
+        MeloNX.set_view_size(Int32(rect.width), Int32(rect.height))
     }
 
     static func setUnboundedPresentTargetFps(for screen: UIScreen?) {
@@ -106,14 +106,14 @@ final class Ryujinx {
     private static func getDlcList(titleId: String, path: String) -> DlcNcaListC {
         titleId.withCString { titlePtr in
             path.withCString { pathPtr in
-                return get_dlc_nca_list(titlePtr, pathPtr)
+                return MeloNX.get_dlc_nca_list(titlePtr, pathPtr)
             }
         }
     }
     
     static func getDlcNcaList(titleId: String, path: String) -> [DownloadableContentNca] {
         let listPointer = Self.getDlcList(titleId: titleId, path: path)
-        defer { free_dlc_nca_list(listPointer) }
+        defer { MeloNX.free_dlc_nca_list(listPointer) }
         guard listPointer.success, listPointer.size > 0, let items = listPointer.items else { return [] }
 
         let list = Array(UnsafeBufferPointer(start: items, count: Int(listPointer.size)))
@@ -236,90 +236,90 @@ final class Ryujinx {
 
     /*
     static func initialize_dualmapped() -> Bool {
-        initialize_dualmapped()
+        MeloNX.initialize_dualmapped()
     }
 
 
     static func getDlcList(titleId: String, path: String) -> DlcNcaList {
         titleId.withCString { titlePtr in
             path.withCString { pathPtr in
-                return get_dlc_nca_list(titlePtr, pathPtr)
+                return MeloNX.get_dlc_nca_list(titlePtr, pathPtr)
             }
         }
     }
 
     static func installFirmware(at path: String) -> (string: String, isError: Bool) {
-        guard let firmware = (path.withCString { install_firmware($0) }) else { return ("Failed to get error.", true) }
+        guard let firmware = (path.withCString { MeloNX.install_firmware($0) }) else { return ("Failed to get error.", true) }
         var string = String(cString: firmware)
         let isErr = string.hasSuffix("✖")
         string.removeLast()
-        defer { free_firmware_version(firmware) }
+        defer { MeloNX.free_firmware_version(firmware) }
         return (string, isErr)
     }
 
     static var installedFirmwareVersion: String {
-        guard let firmware = installed_firmware_version() else { return "" }
-        defer { free_firmware_version(firmware) }
+        guard let firmware = MeloNX.installed_firmware_version() else { return "" }
+        defer { MeloNX.free_firmware_version(firmware) }
         return String(cString: firmware)
     }
 
     static func pauseEmulation(_ shouldPause: Bool) {
-        pause_emulation(shouldPause)
+        MeloNX.pause_emulation(shouldPause)
     }
 
     static func stopEmulation() {
-        stop_emulation()
+        MeloNX.stop_emulation()
     }
 
     static func mainRyu(argv: [String]) -> Int {
         return argv.withCStrings { cStrings, argc in
-            Int(main_ryujinx_sdl(argc, cStrings))
+            Int(MeloNX.main_ryujinx_sdl(argc, cStrings))
         }
     }
     
     static func changeControllerInfo(argv: [String]) {
         argv.withCStrings { cStrings, argc in
-            set_gamepad_configuration(argc, cStrings)
+            MeloNX.set_gamepad_configuration(argc, cStrings)
         }
     }
 
     static func updateSettingsExternal(argv: [String]) -> Int {
         return argv.withCStrings { cStrings, argc in
-            Int(update_settings_external(argc, cStrings))
+            Int(MeloNX.update_settings_external(argc, cStrings))
         }
     }
     
     static func setViewSize(width: Int, height: Int) {
-        set_view_size(Int32(width), Int32(height))
+        MeloNX.set_view_size(Int32(width), Int32(height))
     }
 
     static var currentFPS: Int {
-        Int(get_current_fps())
+        Int(MeloNX.get_current_fps())
     }
     
     static var currentVolume: Float {
         get {
-            get_game_volume()
+            MeloNX.get_game_volume()
         } set {
-            set_game_volume(newValue)
+            MeloNX.set_game_volume(newValue)
         }
     }
 
 
     static func touchBegan(x: Float, y: Float, index: Int) {
-        touch_began(x, y, Int32(index))
+        MeloNX.touch_began(x, y, Int32(index))
     }
 
     static func touchMoved(x: Float, y: Float, index: Int) {
-        touch_moved(x, y, Int32(index))
+        MeloNX.touch_moved(x, y, Int32(index))
     }
 
     static func touchEnded(index: Int) {
-        touch_ended(Int32(index))
+        MeloNX.touch_ended(Int32(index))
     }
 
     static func refreshAccountManager() {
-        refresh_account_manager()
+        MeloNX.refresh_account_manager()
     }
 
     static func createAccount(name: String, image: Data) {
@@ -327,42 +327,42 @@ final class Ryujinx {
             image.withUnsafeBytes { bufferpointer in
                 let imagePtr = bufferpointer.baseAddress!.assumingMemoryBound(to: UInt8.self)
                 
-                create_account(namePtr, imagePtr, Int32(image.count))
+                MeloNX.create_account(namePtr, imagePtr, Int32(image.count))
             }
         }
     }
 
     static func openUser(userId: String) {
-        userId.withCString { open_user($0) }
+        userId.withCString { MeloNX.open_user($0) }
     }
 
     static func closeUser(userId: String) {
-        userId.withCString { close_user($0) }
+        userId.withCString { MeloNX.close_user($0) }
     }
     
     static func attachGamepad(_ id: UnsafeMutableRawPointer?, _ name: String) {
-        _ = name.withCString { attach_gamepad($0, id)  }
+        _ = name.withCString { MeloNX.attach_gamepad($0, id)  }
     }
     
     static func detachGamepad(_ id: UnsafeMutableRawPointer?) {
-        detach_gamepad(id)
+        MeloNX.detach_gamepad(id)
     }
 
     static func setGamepadButtonState(_ id: UnsafeMutableRawPointer?, buttonId: Int, pressed: Bool) {
         print("Gamepad button State \(Int32(buttonId)), pressed \(pressed)")
-        set_gamepad_button_state(id, Int32(buttonId), pressed ? 1 : 0)
+        MeloNX.set_gamepad_button_state(id, Int32(buttonId), pressed ? 1 : 0)
     }
 
     static func setGamepadStickAxis(_ id: UnsafeMutableRawPointer?, stickId: Int, x: Float, y: Float) {
-        set_gamepad_stick_axis(id, Int32(stickId), x, y)
+        MeloNX.set_gamepad_stick_axis(id, Int32(stickId), x, y)
     }
     
     static func setGamepadMotion(_ id: UnsafeMutableRawPointer?, motionType: Int, axis: SIMD3<Float>) {
-        set_gamepad_motion_axis(id, Int32(motionType), axis.x, axis.y, axis.z)
+        MeloNX.set_gamepad_motion_axis(id, Int32(motionType), axis.x, axis.y, axis.z)
     }
 
     static var avatars: AvatarArray {
-        get_avatars()
+        MeloNX.get_avatars()
     }
      */
 }
@@ -398,7 +398,7 @@ fileprivate func main_ryujinx_sdl(_ options: UnsafeMutablePointer<OptionsNative>
 fileprivate func set_keyboard_config(_ options: KeyboardConfigNative)
 
 @_silgen_name("initialize")
-fileprivate func nx_initialize()
+fileprivate func initialize()
 
 @_silgen_name("stop_emulation")
 fileprivate func stop_emulation()
