@@ -13,14 +13,8 @@
       "Bash(/usr/bin/grep -i \"cache\\\\|cpuMemory\\\\|physicalMemory\\\\|GetTotalPhysicalMemory\\\\|TextureCache\")",
       "Bash(/usr/bin/grep -rn \"TotalPhysicalMemory\\\\|cpuMemorySize\\\\|TextureCache.Initialize\\\\|\\\\.Initialize\\(cpuMemory\\\\|MaximumGpuMemory\" /Users/vangelis/Downloads/melonx/src/)",
       "Bash(rg -n \"CacheSize|CodeCache|ReserveSize|new byte\\\\[|AllocateArray|0x[0-9A-Fa-f]{7,}\" src/Ryujinx.Cpu/Jit)",
-      "Bash(python3 -c ' *)",
-      "Bash(xcodebuild -version)",
-      "Bash(plutil -lint src/MeloNX/MeloNX.xcodeproj/project.pbxproj)",
-      "Bash(awk 'NR>=399 && NR<=760' Core/Models/Options/NativeModels.swift)",
-      "Bash(python3 -)",
-      "Bash(plutil -p Info.plist)",
-      "Bash(xcodebuild -list -project MeloNX.xcodeproj)",
-      "Bash(xcodebuild -showsdks)"
+      "Bash(cd /Users/vangelis/Downloads && echo \"=== SCHEME DIFF ===\" ; rtk proxy diff \"melonx 2/src/MeloNX/MeloNX.xcodeproj/xcshareddata/xcschemes/MeloNX.xcscheme\" \"melonx kopie/src/MeloNX/MeloNX.xcodeproj/xcshareddata/xcschemes/MeloNX.xcscheme\"; echo \"=== TARGET NAME ===\" ; rtk proxy grep -n \"name = MeloNX\\\\|productName\" \"melonx kopie/src/MeloNX/MeloNX.xcodeproj/project.pbxproj\" | head)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
